@@ -27,6 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Search,
   Sparkles,
@@ -46,6 +47,10 @@ import {
   CheckCircle2,
   AlertCircle,
   History,
+  Upload,
+  Link2,
+  CheckCircle,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -122,12 +127,139 @@ const EMPTY_FORM: NewCandidateFormState = {
   notes: "",
 };
 
+// ─── Shared candidate form fields (used in Manual + CV preview) ────────────────
+function CandidateFormFields({
+  form,
+  onChange,
+}: {
+  form: NewCandidateFormState;
+  onChange: (field: keyof NewCandidateFormState, value: string) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label htmlFor="nc-name">Name <span className="text-destructive">*</span></Label>
+        <Input id="nc-name" value={form.name} onChange={(e) => onChange("name", e.target.value)} placeholder="Jane Smith" required />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="nc-title">Title <span className="text-destructive">*</span></Label>
+        <Input id="nc-title" value={form.title} onChange={(e) => onChange("title", e.target.value)} placeholder="VP Finance" required />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="nc-company">Company <span className="text-destructive">*</span></Label>
+          <Input id="nc-company" value={form.company} onChange={(e) => onChange("company", e.target.value)} placeholder="Acme Corp" required />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="nc-location">Location <span className="text-destructive">*</span></Label>
+          <Input id="nc-location" value={form.location} onChange={(e) => onChange("location", e.target.value)} placeholder="New York, NY" required />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="nc-email">Email</Label>
+        <Input id="nc-email" type="email" value={form.email} onChange={(e) => onChange("email", e.target.value)} placeholder="jane@example.com" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="nc-phone">Phone</Label>
+          <Input id="nc-phone" value={form.phone} onChange={(e) => onChange("phone", e.target.value)} placeholder="+1 555 000 0000" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="nc-linkedin">LinkedIn</Label>
+          <Input id="nc-linkedin" value={form.linkedin} onChange={(e) => onChange("linkedin", e.target.value)} placeholder="linkedin.com/in/janesmith" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="nc-matchScore">Match Score (0–100)</Label>
+          <Input id="nc-matchScore" type="number" min={0} max={100} value={form.matchScore} onChange={(e) => onChange("matchScore", e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="nc-status">Status</Label>
+          <Select value={form.status} onValueChange={(v) => onChange("status", v)}>
+            <SelectTrigger id="nc-status"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sourced">Sourced</SelectItem>
+              <SelectItem value="contacted">Contacted</SelectItem>
+              <SelectItem value="screening">Screening</SelectItem>
+              <SelectItem value="interview">Interview</SelectItem>
+              <SelectItem value="offer">Offer</SelectItem>
+              <SelectItem value="placed">Placed</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="nc-tags">Tags (comma-separated)</Label>
+        <Input id="nc-tags" value={form.tags} onChange={(e) => onChange("tags", e.target.value)} placeholder="PE-backed, Series B, SaaS" />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="nc-notes">Notes</Label>
+        <Textarea id="nc-notes" value={form.notes} onChange={(e) => onChange("notes", e.target.value)} placeholder="Additional context..." rows={2} />
+      </div>
+    </div>
+  );
+}
+
+function buildPayload(form: NewCandidateFormState) {
+  const tagsArray = form.tags ? form.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+  return {
+    name: form.name,
+    title: form.title,
+    company: form.company,
+    location: form.location,
+    email: form.email,
+    phone: form.phone || "",
+    linkedin: form.linkedin || "",
+    matchScore: Number(form.matchScore) || 85,
+    status: form.status,
+    tags: JSON.stringify(tagsArray),
+    notes: form.notes || "",
+    timeline: JSON.stringify([{ date: new Date().toISOString().slice(0, 10), event: "Added to pipeline" }]),
+    lastContact: new Date().toISOString().slice(0, 10),
+  };
+}
+
 function AddCandidateDialog() {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState("manual");
+
+  // Manual form
   const [form, setForm] = useState<NewCandidateFormState>(EMPTY_FORM);
 
-  const mutation = useMutation({
+  // CV upload state
+  const [cvFile, setCvFile] = useState<File | null>(null);
+  const [cvDragOver, setCvDragOver] = useState(false);
+  const [cvLoading, setCvLoading] = useState(false);
+  const [cvPreview, setCvPreview] = useState<NewCandidateFormState | null>(null);
+
+  // LinkedIn state
+  const [liUrl, setLiUrl] = useState("");
+  const [liLoading, setLiLoading] = useState(false);
+  const [liPreview, setLiPreview] = useState<NewCandidateFormState | null>(null);
+
+  function handleChange(field: keyof NewCandidateFormState, value: string) {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  }
+  function handleCvChange(field: keyof NewCandidateFormState, value: string) {
+    setCvPreview((prev) => prev ? { ...prev, [field]: value } : prev);
+  }
+  function handleLiChange(field: keyof NewCandidateFormState, value: string) {
+    setLiPreview((prev) => prev ? { ...prev, [field]: value } : prev);
+  }
+
+  function resetAll() {
+    setForm(EMPTY_FORM);
+    setCvFile(null);
+    setCvPreview(null);
+    setLiUrl("");
+    setLiPreview(null);
+    setTab("manual");
+  }
+
+  // ── Manual save ──
+  const manualMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
       const res = await apiRequest("POST", "/api/candidates", data);
       return res.json();
@@ -135,235 +267,320 @@ function AddCandidateDialog() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/candidates"] });
       setOpen(false);
-      setForm(EMPTY_FORM);
+      resetAll();
       toast({ title: "Candidate added", description: "Successfully added to your pipeline." });
     },
-    onError: (err: Error) => {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
-    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
-  function handleChange(field: keyof NewCandidateFormState, value: string) {
-    setForm((prev) => ({ ...prev, [field]: value }));
+  function handleManualSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    manualMutation.mutate(buildPayload(form));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  // ── CV upload ──
+  async function handleCvUpload(file: File) {
+    setCvFile(file);
+    setCvLoading(true);
+    setCvPreview(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/candidates/import/cv", { method: "POST", body: fd });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Upload failed");
+      const p = json.preview;
+      const tagsArr: string[] = (() => { try { return JSON.parse(p.tags || "[]"); } catch { return []; } })();
+      setCvPreview({
+        name: p.name || "",
+        title: p.title || "",
+        company: p.company || "",
+        location: p.location || "",
+        email: p.email || "",
+        phone: p.phone || "",
+        linkedin: p.linkedin || "",
+        matchScore: String(p.matchScore || 75),
+        status: p.status || "sourced",
+        tags: tagsArr.join(", "),
+        notes: p.notes || "",
+      });
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+    } finally {
+      setCvLoading(false);
+    }
+  }
+
+  const cvConfirmMutation = useMutation({
+    mutationFn: async (data: Record<string, unknown>) => {
+      const res = await apiRequest("POST", "/api/candidates/import/cv/confirm", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/candidates"] });
+      setOpen(false);
+      resetAll();
+      toast({ title: "Candidate imported", description: "CV parsed and saved to your pipeline." });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  function handleCvConfirm(e: React.FormEvent) {
     e.preventDefault();
-    const tagsArray = form.tags
-      ? form.tags.split(",").map((t) => t.trim()).filter(Boolean)
-      : [];
-    mutation.mutate({
-      name: form.name,
-      title: form.title,
-      company: form.company,
-      location: form.location,
-      email: form.email,
-      phone: form.phone || "",
-      linkedin: form.linkedin || "",
-      matchScore: Number(form.matchScore) || 85,
-      status: form.status,
+    if (!cvPreview) return;
+    const tagsArray = cvPreview.tags ? cvPreview.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+    cvConfirmMutation.mutate({
+      ...cvPreview,
+      matchScore: Number(cvPreview.matchScore) || 75,
       tags: JSON.stringify(tagsArray),
-      notes: form.notes || "",
-      timeline: JSON.stringify([
-        { date: new Date().toISOString().slice(0, 10), event: "Added to pipeline" },
-      ]),
+      timeline: JSON.stringify([{ date: new Date().toISOString().slice(0, 10), event: "Imported via CV upload" }]),
+      lastContact: new Date().toISOString().slice(0, 10),
+    });
+  }
+
+  // ── LinkedIn import ──
+  async function handleLiLookup() {
+    if (!liUrl.includes("linkedin.com/in/")) {
+      toast({ title: "Invalid URL", description: "Please enter a valid linkedin.com/in/... URL", variant: "destructive" });
+      return;
+    }
+    setLiLoading(true);
+    setLiPreview(null);
+    try {
+      const res = await apiRequest("POST", "/api/candidates/import/linkedin", { url: liUrl });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Import failed");
+      const p = json.preview;
+      const tagsArr: string[] = (() => { try { return JSON.parse(p.tags || "[]"); } catch { return []; } })();
+      setLiPreview({
+        name: p.name || "",
+        title: p.title || "",
+        company: p.company || "",
+        location: p.location || "",
+        email: p.email || "",
+        phone: p.phone || "",
+        linkedin: liUrl,
+        matchScore: String(p.matchScore || 80),
+        status: p.status || "sourced",
+        tags: tagsArr.join(", "),
+        notes: p.notes || "",
+      });
+    } catch (err: any) {
+      toast({ title: "Import failed", description: err.message, variant: "destructive" });
+    } finally {
+      setLiLoading(false);
+    }
+  }
+
+  const liConfirmMutation = useMutation({
+    mutationFn: async (data: Record<string, unknown>) => {
+      const res = await apiRequest("POST", "/api/candidates/import/linkedin/confirm", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/candidates"] });
+      setOpen(false);
+      resetAll();
+      toast({ title: "Candidate imported", description: "LinkedIn profile saved to your pipeline." });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  function handleLiConfirm(e: React.FormEvent) {
+    e.preventDefault();
+    if (!liPreview) return;
+    const tagsArray = liPreview.tags ? liPreview.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+    liConfirmMutation.mutate({
+      ...liPreview,
+      matchScore: Number(liPreview.matchScore) || 80,
+      tags: JSON.stringify(tagsArray),
+      linkedin: liUrl,
+      timeline: JSON.stringify([{ date: new Date().toISOString().slice(0, 10), event: "Imported via LinkedIn" }]),
       lastContact: new Date().toISOString().slice(0, 10),
     });
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetAll(); }}>
       <DialogTrigger asChild>
         <Button size="sm" className="gap-2" data-testid="button-new-candidate">
           <Plus size={14} />
-          New Candidate
+          Add Candidate
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add New Candidate</DialogTitle>
+          <DialogTitle>Add Candidate</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
-          {/* Row: Name */}
-          <div className="space-y-1.5">
-            <Label htmlFor="nc-name">
-              Name <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="nc-name"
-              value={form.name}
-              onChange={(e) => handleChange("name", e.target.value)}
-              placeholder="Jane Smith"
-              required
-              data-testid="input-nc-name"
-            />
-          </div>
 
-          {/* Row: Title */}
-          <div className="space-y-1.5">
-            <Label htmlFor="nc-title">
-              Title <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="nc-title"
-              value={form.title}
-              onChange={(e) => handleChange("title", e.target.value)}
-              placeholder="VP Finance"
-              required
-              data-testid="input-nc-title"
-            />
-          </div>
+        <Tabs value={tab} onValueChange={setTab} className="mt-1">
+          <TabsList className="w-full">
+            <TabsTrigger value="manual" className="flex-1 gap-1.5">
+              <User size={13} /> Manual
+            </TabsTrigger>
+            <TabsTrigger value="cv" className="flex-1 gap-1.5">
+              <Upload size={13} /> Upload CV
+            </TabsTrigger>
+            <TabsTrigger value="linkedin" className="flex-1 gap-1.5">
+              <Linkedin size={13} /> LinkedIn
+            </TabsTrigger>
+          </TabsList>
 
-          {/* Row: Company + Location */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="nc-company">
-                Company <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="nc-company"
-                value={form.company}
-                onChange={(e) => handleChange("company", e.target.value)}
-                placeholder="Acme Corp"
-                required
-                data-testid="input-nc-company"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="nc-location">
-                Location <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="nc-location"
-                value={form.location}
-                onChange={(e) => handleChange("location", e.target.value)}
-                placeholder="New York, NY"
-                required
-                data-testid="input-nc-location"
-              />
-            </div>
-          </div>
+          {/* ── MANUAL TAB ── */}
+          <TabsContent value="manual" className="mt-4">
+            <form onSubmit={handleManualSubmit} className="space-y-4">
+              <CandidateFormFields form={form} onChange={handleChange} />
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+                <Button type="submit" size="sm" disabled={manualMutation.isPending}>
+                  {manualMutation.isPending ? <><Loader2 size={13} className="animate-spin mr-1" />Saving...</> : "Add Candidate"}
+                </Button>
+              </div>
+            </form>
+          </TabsContent>
 
-          {/* Row: Email */}
-          <div className="space-y-1.5">
-            <Label htmlFor="nc-email">
-              Email <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="nc-email"
-              type="email"
-              value={form.email}
-              onChange={(e) => handleChange("email", e.target.value)}
-              placeholder="jane@example.com"
-              required
-              data-testid="input-nc-email"
-            />
-          </div>
-
-          {/* Row: Phone + LinkedIn */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="nc-phone">Phone</Label>
-              <Input
-                id="nc-phone"
-                value={form.phone}
-                onChange={(e) => handleChange("phone", e.target.value)}
-                placeholder="+1 555 000 0000"
-                data-testid="input-nc-phone"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="nc-linkedin">LinkedIn</Label>
-              <Input
-                id="nc-linkedin"
-                value={form.linkedin}
-                onChange={(e) => handleChange("linkedin", e.target.value)}
-                placeholder="linkedin.com/in/janesmith"
-                data-testid="input-nc-linkedin"
-              />
-            </div>
-          </div>
-
-          {/* Row: Match Score + Status */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="nc-matchScore">Match Score (0–100)</Label>
-              <Input
-                id="nc-matchScore"
-                type="number"
-                min={0}
-                max={100}
-                value={form.matchScore}
-                onChange={(e) => handleChange("matchScore", e.target.value)}
-                data-testid="input-nc-matchscore"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="nc-status">Status</Label>
-              <Select
-                value={form.status}
-                onValueChange={(v) => handleChange("status", v)}
+          {/* ── CV UPLOAD TAB ── */}
+          <TabsContent value="cv" className="mt-4 space-y-4">
+            {/* Drop zone */}
+            {!cvPreview && (
+              <div
+                className={cn(
+                  "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
+                  cvDragOver ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"
+                )}
+                onDragOver={(e) => { e.preventDefault(); setCvDragOver(true); }}
+                onDragLeave={() => setCvDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setCvDragOver(false);
+                  const file = e.dataTransfer.files[0];
+                  if (file) handleCvUpload(file);
+                }}
+                onClick={() => document.getElementById("cv-file-input")?.click()}
               >
-                <SelectTrigger id="nc-status" data-testid="select-nc-status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="sourced">Sourced</SelectItem>
-                  <SelectItem value="contacted">Contacted</SelectItem>
-                  <SelectItem value="screening">Screening</SelectItem>
-                  <SelectItem value="interview">Interview</SelectItem>
-                  <SelectItem value="offer">Offer</SelectItem>
-                  <SelectItem value="placed">Placed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+                <input
+                  id="cv-file-input"
+                  type="file"
+                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleCvUpload(f); }}
+                />
+                {cvLoading ? (
+                  <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                    <Loader2 size={32} className="animate-spin text-primary" />
+                    <div>
+                      <p className="font-medium text-sm">Parsing CV with AI...</p>
+                      <p className="text-xs mt-0.5">Extracting candidate details</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                    <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                      <Upload size={20} />
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm text-foreground">Drop CV here or click to browse</p>
+                      <p className="text-xs mt-0.5">PDF, Word (.doc, .docx) — up to 10 MB</p>
+                    </div>
+                    {cvFile && (
+                      <p className="text-xs font-medium text-primary">{cvFile.name}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
-          {/* Tags */}
-          <div className="space-y-1.5">
-            <Label htmlFor="nc-tags">Tags (comma-separated)</Label>
-            <Input
-              id="nc-tags"
-              value={form.tags}
-              onChange={(e) => handleChange("tags", e.target.value)}
-              placeholder="PE-backed, Series B, SaaS"
-              data-testid="input-nc-tags"
-            />
-          </div>
+            {/* Preview + edit after parse */}
+            {cvPreview && !cvLoading && (
+              <form onSubmit={handleCvConfirm} className="space-y-4">
+                <div className="flex items-center gap-2 p-2 rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                  <CheckCircle size={14} className="text-green-600 shrink-0" />
+                  <p className="text-xs text-green-700 dark:text-green-400">
+                    CV parsed from <span className="font-medium">{cvFile?.name}</span> — review and confirm below.
+                  </p>
+                  <Button
+                    type="button" variant="ghost" size="sm" className="ml-auto h-6 px-2 text-xs"
+                    onClick={() => { setCvPreview(null); setCvFile(null); }}
+                  >
+                    Re-upload
+                  </Button>
+                </div>
+                <CandidateFormFields form={cvPreview} onChange={handleCvChange} />
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+                  <Button type="submit" size="sm" disabled={cvConfirmMutation.isPending}>
+                    {cvConfirmMutation.isPending ? <><Loader2 size={13} className="animate-spin mr-1" />Saving...</> : "Save Candidate"}
+                  </Button>
+                </div>
+              </form>
+            )}
+          </TabsContent>
 
-          {/* Notes */}
-          <div className="space-y-1.5">
-            <Label htmlFor="nc-notes">Notes</Label>
-            <Textarea
-              id="nc-notes"
-              value={form.notes}
-              onChange={(e) => handleChange("notes", e.target.value)}
-              placeholder="Additional context about this candidate..."
-              rows={3}
-              data-testid="textarea-nc-notes"
-            />
-          </div>
+          {/* ── LINKEDIN TAB ── */}
+          <TabsContent value="linkedin" className="mt-4 space-y-4">
+            {!liPreview && (
+              <>
+                <div className="rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/10 p-3">
+                  <p className="text-xs text-blue-700 dark:text-blue-400">
+                    Enter a LinkedIn profile URL to fetch candidate details via ProxyCurl — a licensed data provider that complies with LinkedIn's permitted use policy.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="li-url">LinkedIn Profile URL</Label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Link2 size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="li-url"
+                        value={liUrl}
+                        onChange={(e) => setLiUrl(e.target.value)}
+                        placeholder="https://linkedin.com/in/janesmith"
+                        className="pl-8"
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleLiLookup(); } }}
+                      />
+                    </div>
+                    <Button type="button" size="sm" onClick={handleLiLookup} disabled={liLoading || !liUrl}>
+                      {liLoading ? <Loader2 size={13} className="animate-spin" /> : "Fetch"}
+                    </Button>
+                  </div>
+                </div>
+                {liLoading && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 size={14} className="animate-spin text-primary" />
+                    Fetching LinkedIn profile...
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Note: Requires <span className="font-medium">PROXYCURL_API_KEY</span> to be set in your Render environment variables.
+                </p>
+              </>
+            )}
 
-          <div className="flex justify-end gap-2 pt-1">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setOpen(false)}
-              data-testid="button-nc-cancel"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={mutation.isPending}
-              data-testid="button-nc-submit"
-            >
-              {mutation.isPending ? "Adding..." : "Add Candidate"}
-            </Button>
-          </div>
-        </form>
+            {liPreview && !liLoading && (
+              <form onSubmit={handleLiConfirm} className="space-y-4">
+                <div className="flex items-center gap-2 p-2 rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                  <CheckCircle size={14} className="text-green-600 shrink-0" />
+                  <p className="text-xs text-green-700 dark:text-green-400">
+                    Profile fetched — review and confirm below.
+                  </p>
+                  <Button
+                    type="button" variant="ghost" size="sm" className="ml-auto h-6 px-2 text-xs"
+                    onClick={() => setLiPreview(null)}
+                  >
+                    Try another
+                  </Button>
+                </div>
+                <CandidateFormFields form={liPreview} onChange={handleLiChange} />
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+                  <Button type="submit" size="sm" disabled={liConfirmMutation.isPending}>
+                    {liConfirmMutation.isPending ? <><Loader2 size={13} className="animate-spin mr-1" />Saving...</> : "Save Candidate"}
+                  </Button>
+                </div>
+              </form>
+            )}
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

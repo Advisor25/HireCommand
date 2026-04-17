@@ -6,6 +6,7 @@ import { registerOpenApi } from "./openapi";
 import { registerSourcingRoutes } from "./sourcing";
 import { registerQBRoutes } from "./quickbooks";
 import { registerLinkedInSyncRoutes, checkAndRunStartupSync } from "./linkedin-sync";
+import { registerCandidateImportRoutes } from "./candidate-import";
 import { insertInvoiceSchema } from "@shared/schema";
 
 export async function registerRoutes(
@@ -287,7 +288,7 @@ export async function registerRoutes(
     if (!apiKey) return res.status(400).json({ error: "No API key configured" });
     try {
       const r = await fetch(`${LOXO_BASE}/${slug}/people?per_page=1`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
+        headers: { Authorization: `Token token=${apiKey}` },
       });
       if (!r.ok) return res.status(401).json({ error: "Invalid credentials" });
       const data: any = await r.json();
@@ -341,7 +342,7 @@ export async function registerRoutes(
           ? `${LOXO_BASE}/${slug}/people?per_page=${perPage}&scroll_id=${encodeURIComponent(scrollId)}`
           : `${LOXO_BASE}/${slug}/people?per_page=${perPage}`;
 
-        const r = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+        const r = await fetch(url, { headers: { Authorization: `Token token=${apiKey}` } });
         if (!r.ok) { send({ error: `Loxo API error: ${r.status}` }); break; }
         const data: any = await r.json();
         const people: any[] = data.people || [];
@@ -404,7 +405,7 @@ export async function registerRoutes(
       while (hasMoreJobs && jobPage <= maxJobPages) {
         const r = await fetch(
           `${LOXO_BASE}/${slug}/jobs?per_page=25&page=${jobPage}`,
-          { headers: { Authorization: `Bearer ${apiKey}` } }
+          { headers: { Authorization: `Token token=${apiKey}` } }
         );
         if (!r.ok) { send({ error: `Loxo jobs API error: ${r.status}` }); break; }
         const data: any = await r.json();
@@ -603,6 +604,9 @@ export async function registerRoutes(
       res.json({ deleted: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
+
+  // ======================== CANDIDATE IMPORT (CV + LinkedIn) ========================
+  try { registerCandidateImportRoutes(app); } catch(e: any) { console.error("[routes] Candidate import routes failed:", e.message); }
 
   // ======================== QUICKBOOKS ========================
   try { registerQBRoutes(app); } catch(e: any) { console.error("[routes] QB routes failed:", e.message); }
