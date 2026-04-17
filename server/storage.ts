@@ -6,16 +6,21 @@ import {
   type Campaign, type InsertCampaign, campaigns,
   type Activity, type InsertActivity, activities,
   type Interview, type InsertInterview, interviews,
+  type Placement, type InsertPlacement, placements,
+  type CommissionSplit, type InsertCommissionSplit, commissionSplits,
+  type Invoice, type InsertInvoice, invoices,
   settings,
 } from "@shared/schema";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
-import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import { eq, desc } from "drizzle-orm";
 
-const sqlite = new Database("data.db");
-sqlite.pragma("journal_mode = WAL");
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL environment variable is required");
+}
 
-export const db = drizzle(sqlite);
+const client = postgres(process.env.DATABASE_URL, { max: 10 });
+export const db = drizzle(client);
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
@@ -41,91 +46,242 @@ export interface IStorage {
   createInterview(i: InsertInterview): Promise<Interview>;
   updateInterview(id: number, i: Partial<InsertInterview>): Promise<Interview | undefined>;
   deleteInterview(id: number): Promise<void>;
-  // Settings
-  getSetting(key: string): Promise<string | undefined>;
-  setSetting(key: string, value: string): Promise<void>;
   // Loxo sync helpers
   getCandidateByLoxoId(loxoId: number): Promise<Candidate | undefined>;
   getJobByLoxoId(loxoId: number): Promise<Job | undefined>;
   upsertCandidateFromLoxo(c: InsertCandidate & { loxoId: number }): Promise<Candidate>;
   upsertJobFromLoxo(j: InsertJob & { loxoId: number }): Promise<Job>;
+  // Placements
+  getPlacements(): Promise<Placement[]>;
+  getPlacement(id: number): Promise<Placement | undefined>;
+  createPlacement(p: InsertPlacement): Promise<Placement>;
+  updatePlacement(id: number, p: Partial<InsertPlacement>): Promise<Placement | undefined>;
+  deletePlacement(id: number): Promise<void>;
+  // Commission splits
+  getSplitsForPlacement(placementId: number): Promise<CommissionSplit[]>;
+  getSplitsForEmployee(employee: string): Promise<CommissionSplit[]>;
+  upsertSplitsForPlacement(placementId: number, splits: InsertCommissionSplit[]): Promise<CommissionSplit[]>;
+  // Invoices
+  getInvoices(): Promise<Invoice[]>;
+  getInvoice(id: number): Promise<Invoice | undefined>;
+  createInvoice(inv: InsertInvoice): Promise<Invoice>;
+  updateInvoice(id: number, inv: Partial<InsertInvoice>): Promise<Invoice | undefined>;
+  deleteInvoice(id: number): Promise<void>;
+  // Settings (key-value)
+  getSetting(key: string): Promise<string | undefined>;
+  setSetting(key: string, value: string): Promise<void>;
+  deleteSetting(key: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
-  async getUser(id: number) { return db.select().from(users).where(eq(users.id, id)).get(); }
-  async getUserByUsername(username: string) { return db.select().from(users).where(eq(users.username, username)).get(); }
-  async createUser(u: InsertUser) { return db.insert(users).values(u).returning().get(); }
-  async getCandidates() { return db.select().from(candidates).all(); }
-  async getCandidate(id: number) { return db.select().from(candidates).where(eq(candidates.id, id)).get(); }
-  async createCandidate(c: InsertCandidate) { return db.insert(candidates).values(c).returning().get(); }
+  async getUser(id: number) {
+    const rows = await db.select().from(users).where(eq(users.id, id));
+    return rows[0];
+  }
+  async getUserByUsername(username: string) {
+    const rows = await db.select().from(users).where(eq(users.username, username));
+    return rows[0];
+  }
+  async createUser(u: InsertUser) {
+    const rows = await db.insert(users).values(u).returning();
+    return rows[0];
+  }
+
+  async getCandidates() {
+    return db.select().from(candidates);
+  }
+  async getCandidate(id: number) {
+    const rows = await db.select().from(candidates).where(eq(candidates.id, id));
+    return rows[0];
+  }
+  async createCandidate(c: InsertCandidate) {
+    const rows = await db.insert(candidates).values(c).returning();
+    return rows[0];
+  }
   async updateCandidate(id: number, c: Partial<InsertCandidate>) {
-    db.update(candidates).set(c).where(eq(candidates.id, id)).run();
-    return db.select().from(candidates).where(eq(candidates.id, id)).get();
+    const rows = await db.update(candidates).set(c).where(eq(candidates.id, id)).returning();
+    return rows[0];
   }
-  async deleteCandidate(id: number) { db.delete(candidates).where(eq(candidates.id, id)).run(); }
-  async getJobs() { return db.select().from(jobs).all(); }
-  async getJob(id: number) { return db.select().from(jobs).where(eq(jobs.id, id)).get(); }
-  async createJob(j: InsertJob) { return db.insert(jobs).values(j).returning().get(); }
+  async deleteCandidate(id: number) {
+    await db.delete(candidates).where(eq(candidates.id, id));
+  }
+
+  async getJobs() {
+    return db.select().from(jobs);
+  }
+  async getJob(id: number) {
+    const rows = await db.select().from(jobs).where(eq(jobs.id, id));
+    return rows[0];
+  }
+  async createJob(j: InsertJob) {
+    const rows = await db.insert(jobs).values(j).returning();
+    return rows[0];
+  }
   async updateJob(id: number, j: Partial<InsertJob>) {
-    db.update(jobs).set(j).where(eq(jobs.id, id)).run();
-    return db.select().from(jobs).where(eq(jobs.id, id)).get();
+    const rows = await db.update(jobs).set(j).where(eq(jobs.id, id)).returning();
+    return rows[0];
   }
-  async getOpportunities() { return db.select().from(opportunities).all(); }
-  async getOpportunity(id: number) { return db.select().from(opportunities).where(eq(opportunities.id, id)).get(); }
-  async getCampaigns() { return db.select().from(campaigns).all(); }
-  async getCampaign(id: number) { return db.select().from(campaigns).where(eq(campaigns.id, id)).get(); }
-  async getActivities() { return db.select().from(activities).all(); }
-  async createActivity(a: InsertActivity) { return db.insert(activities).values(a).returning().get(); }
-  async getInterviews() { return db.select().from(interviews).all(); }
-  async getInterview(id: number) { return db.select().from(interviews).where(eq(interviews.id, id)).get(); }
-  async createInterview(i: InsertInterview) { return db.insert(interviews).values(i).returning().get(); }
+
+  async getOpportunities() {
+    return db.select().from(opportunities);
+  }
+  async getOpportunity(id: number) {
+    const rows = await db.select().from(opportunities).where(eq(opportunities.id, id));
+    return rows[0];
+  }
+
+  async getCampaigns() {
+    return db.select().from(campaigns);
+  }
+  async getCampaign(id: number) {
+    const rows = await db.select().from(campaigns).where(eq(campaigns.id, id));
+    return rows[0];
+  }
+
+  async getActivities() {
+    return db.select().from(activities);
+  }
+  async createActivity(a: InsertActivity) {
+    const rows = await db.insert(activities).values(a).returning();
+    return rows[0];
+  }
+
+  async getInterviews() {
+    return db.select().from(interviews);
+  }
+  async getInterview(id: number) {
+    const rows = await db.select().from(interviews).where(eq(interviews.id, id));
+    return rows[0];
+  }
+  async createInterview(i: InsertInterview) {
+    const rows = await db.insert(interviews).values(i).returning();
+    return rows[0];
+  }
   async updateInterview(id: number, i: Partial<InsertInterview>) {
-    db.update(interviews).set(i).where(eq(interviews.id, id)).run();
-    return db.select().from(interviews).where(eq(interviews.id, id)).get();
+    const rows = await db.update(interviews).set(i).where(eq(interviews.id, id)).returning();
+    return rows[0];
   }
-  async deleteInterview(id: number) { db.delete(interviews).where(eq(interviews.id, id)).run(); }
-
-  // Settings
-  async getSetting(key: string) {
-    const row = db.select().from(settings).where(eq(settings.key, key)).get();
-    return row?.value;
-  }
-  async setSetting(key: string, value: string) {
-    db.insert(settings).values({ key, value })
-      .onConflictDoUpdate({ target: settings.key, set: { value } })
-      .run();
+  async deleteInterview(id: number) {
+    await db.delete(interviews).where(eq(interviews.id, id));
   }
 
-  // Loxo sync helpers
+  // ── Loxo sync helpers ─────────────────────────────────────────────────────
   async getCandidateByLoxoId(loxoId: number) {
-    return db.select().from(candidates).where(eq(candidates.loxoId, loxoId)).get();
+    const rows = await db.select().from(candidates).where(eq(candidates.loxoId, loxoId));
+    return rows[0];
   }
   async getJobByLoxoId(loxoId: number) {
-    return db.select().from(jobs).where(eq(jobs.loxoId, loxoId)).get();
+    const rows = await db.select().from(jobs).where(eq(jobs.loxoId, loxoId));
+    return rows[0];
   }
   async upsertCandidateFromLoxo(c: InsertCandidate & { loxoId: number }) {
     const existing = await this.getCandidateByLoxoId(c.loxoId);
     if (existing) {
-      db.update(candidates).set(c).where(eq(candidates.loxoId, c.loxoId)).run();
-      return db.select().from(candidates).where(eq(candidates.loxoId, c.loxoId)).get()!;
+      const rows = await db.update(candidates).set(c).where(eq(candidates.loxoId, c.loxoId)).returning();
+      return rows[0];
     }
-    return db.insert(candidates).values(c).returning().get();
+    const rows = await db.insert(candidates).values(c).returning();
+    return rows[0];
   }
   async upsertJobFromLoxo(j: InsertJob & { loxoId: number }) {
     const existing = await this.getJobByLoxoId(j.loxoId);
     if (existing) {
-      db.update(jobs).set(j).where(eq(jobs.loxoId, j.loxoId)).run();
-      return db.select().from(jobs).where(eq(jobs.loxoId, j.loxoId)).get()!;
+      const rows = await db.update(jobs).set(j).where(eq(jobs.loxoId, j.loxoId)).returning();
+      return rows[0];
     }
-    return db.insert(jobs).values(j).returning().get();
+    const rows = await db.insert(jobs).values(j).returning();
+    return rows[0];
+  }
+
+  // ── Placements ────────────────────────────────────────────────────────────
+  async getPlacements() {
+    return db.select().from(placements);
+  }
+  async getPlacement(id: number) {
+    const rows = await db.select().from(placements).where(eq(placements.id, id));
+    return rows[0];
+  }
+  async createPlacement(p: InsertPlacement) {
+    const rows = await db.insert(placements).values(p).returning();
+    return rows[0];
+  }
+  async updatePlacement(id: number, p: Partial<InsertPlacement>) {
+    const rows = await db.update(placements).set(p).where(eq(placements.id, id)).returning();
+    return rows[0];
+  }
+  async deletePlacement(id: number) {
+    await db.delete(placements).where(eq(placements.id, id));
+  }
+
+  // ── Commission splits ─────────────────────────────────────────────────────
+  async getSplitsForPlacement(placementId: number) {
+    return db.select().from(commissionSplits).where(eq(commissionSplits.placementId, placementId));
+  }
+  async getSplitsForEmployee(employee: string) {
+    return db.select().from(commissionSplits).where(eq(commissionSplits.employee, employee));
+  }
+  async upsertSplitsForPlacement(placementId: number, splits: InsertCommissionSplit[]) {
+    // Delete existing splits for this placement, then re-insert
+    await db.delete(commissionSplits).where(eq(commissionSplits.placementId, placementId));
+    if (splits.length === 0) return [];
+    const rows = await db
+      .insert(commissionSplits)
+      .values(splits.map(s => ({ ...s, placementId })))
+      .returning();
+    return rows;
+  }
+
+  // ── Invoices ──────────────────────────────────────────────────────────────
+  async getInvoices() {
+    // newest first
+    const rows = await db.select().from(invoices).orderBy(desc(invoices.id));
+    return rows;
+  }
+  async getInvoice(id: number) {
+    const rows = await db.select().from(invoices).where(eq(invoices.id, id));
+    return rows[0];
+  }
+  async createInvoice(inv: InsertInvoice) {
+    const rows = await db.insert(invoices).values(inv).returning();
+    return rows[0];
+  }
+  async updateInvoice(id: number, inv: Partial<InsertInvoice>) {
+    const existing = await this.getInvoice(id);
+    if (!existing) return undefined;
+    const rows = await db
+      .update(invoices)
+      .set({ ...inv, updatedAt: new Date().toISOString() })
+      .where(eq(invoices.id, id))
+      .returning();
+    return rows[0];
+  }
+  async deleteInvoice(id: number) {
+    await db.delete(invoices).where(eq(invoices.id, id));
+  }
+
+  // ── Settings ──────────────────────────────────────────────────────────────
+  async getSetting(key: string) {
+    const rows = await db.select().from(settings).where(eq(settings.key, key));
+    return rows[0]?.value;
+  }
+  async setSetting(key: string, value: string) {
+    const existing = await this.getSetting(key);
+    if (existing !== undefined) {
+      await db.update(settings).set({ value }).where(eq(settings.key, key));
+    } else {
+      await db.insert(settings).values({ key, value });
+    }
+  }
+  async deleteSetting(key: string) {
+    await db.delete(settings).where(eq(settings.key, key));
   }
 }
 
 export const storage = new DatabaseStorage();
 
-// Seed data
-function seed() {
-  const existingCandidates = db.select().from(candidates).all();
+// Seed data (runs only when DB is empty)
+async function seed() {
+  const existingCandidates = await db.select().from(candidates);
   if (existingCandidates.length > 0) return;
 
   // Candidates - Multi-function C-Suite and Senior Executives
@@ -135,65 +291,51 @@ function seed() {
     { name: "Jennifer Park", title: "CFO", company: "Summit Capital Portfolio Co", location: "Chicago, IL", email: "jpark@summitcap.com", phone: "(312) 555-0518", linkedin: "linkedin.com/in/jenniferparkCFO", matchScore: 94, status: "offer", lastContact: "2025-01-15", tags: JSON.stringify(["PE-backed", "Manufacturing", "Turnaround", "Cost Optimization"]), notes: "Offer extended at $425K base + equity. Waiting on decision by Friday.", timeline: JSON.stringify([{date: "2025-01-15", event: "Offer extended — $425K + equity"}, {date: "2025-01-10", event: "Final round with PE partners"}, {date: "2025-01-05", event: "Second interview"}, {date: "2024-12-18", event: "First interview"}]) },
     { name: "Patricia Huang", title: "CFO", company: "Vanguard Industrial Solutions", location: "Houston, TX", email: "phuang@vanguardind.com", phone: "(713) 555-0129", linkedin: "linkedin.com/in/patriciahuang", matchScore: 93, status: "interview", lastContact: "2025-01-15", tags: JSON.stringify(["Industrial", "PE-backed", "Carve-out", "Working Capital"]), notes: "Exceptional carve-out experience. Led 3 successful PE exits in manufacturing.", timeline: JSON.stringify([{date: "2025-01-15", event: "Interview with board member"}, {date: "2025-01-08", event: "Initial screen — highly impressed"}, {date: "2025-01-02", event: "Referred by PE partner"}]) },
     { name: "Rachel Morrison", title: "CFO", company: "Granite Peak Energy (Warburg portfolio)", location: "Dallas, TX", email: "rmorrison@granitepeak.com", phone: "(214) 555-0741", linkedin: "linkedin.com/in/rachelmorrison-cfo", matchScore: 95, status: "screening", lastContact: "2025-01-14", tags: JSON.stringify(["Energy", "PE-backed", "Infrastructure", "Capital Allocation"]), notes: "Top-tier candidate. Led $1.2B capital project at Granite Peak. Warburg loves her.", timeline: JSON.stringify([{date: "2025-01-14", event: "Screening call — outstanding"}, {date: "2025-01-10", event: "Warm intro from Warburg partner"}]) },
-
     // === CTO / VP Engineering ===
     { name: "Alex Rivera", title: "CTO", company: "DataPulse Analytics (Insight Partners)", location: "San Francisco, CA", email: "arivera@datapulse.io", phone: "(415) 555-0832", linkedin: "linkedin.com/in/alexrivera-cto", matchScore: 93, status: "interview", lastContact: "2025-01-15", tags: JSON.stringify(["Cloud Infrastructure", "AI/ML", "Platform Architecture", "PE-backed"]), notes: "Built DataPulse platform from 0 to 50M MAU. Ex-Google Staff Engineer. Deep AI expertise.", timeline: JSON.stringify([{date: "2025-01-15", event: "Technical deep-dive with CTO committee"}, {date: "2025-01-10", event: "First interview — exceptional"}, {date: "2025-01-05", event: "Sourced via PE tech network"}]) },
     { name: "Priya Nair", title: "VP Engineering", company: "Sentinel AI (a16z portfolio)", location: "Seattle, WA", email: "pnair@sentinelai.com", phone: "(206) 555-0394", linkedin: "linkedin.com/in/priyanair-eng", matchScore: 88, status: "screening", lastContact: "2025-01-13", tags: JSON.stringify(["ML Engineering", "Team Scaling", "DevOps", "Series D"]), notes: "Scaled engineering from 15 to 120. Strong ML infrastructure background from AWS.", timeline: JSON.stringify([{date: "2025-01-13", event: "Phone screen — strong technical depth"}, {date: "2025-01-08", event: "Referral from portfolio CTO"}]) },
     { name: "James Liu", title: "CTO", company: "FinEdge Payments (General Atlantic)", location: "New York, NY", email: "jliu@finedge.com", phone: "(212) 555-0671", linkedin: "linkedin.com/in/jamesliu-cto", matchScore: 91, status: "contacted", lastContact: "2025-01-12", tags: JSON.stringify(["Fintech", "Payments Infrastructure", "SOC2/PCI", "Microservices"]), notes: "Led FinEdge through SOC2 certification while tripling transaction volume. Ex-Stripe.", timeline: JSON.stringify([{date: "2025-01-12", event: "LinkedIn outreach — responded positively"}, {date: "2025-01-09", event: "Identified via fintech network"}]) },
-
     // === COO / VP Operations ===
     { name: "Marcus Williams", title: "COO", company: "HealthBridge Solutions (Bain Capital)", location: "Boston, MA", email: "mwilliams@healthbridge.com", phone: "(617) 555-0483", linkedin: "linkedin.com/in/marcuswilliams-coo", matchScore: 91, status: "interview", lastContact: "2025-01-14", tags: JSON.stringify(["Healthcare Ops", "PE Value Creation", "Process Optimization", "Multi-site"]), notes: "Drove 35% EBITDA improvement across 40 clinic locations. McKinsey background.", timeline: JSON.stringify([{date: "2025-01-14", event: "Second interview with PE operating partner"}, {date: "2025-01-08", event: "First interview — very impressive"}, {date: "2025-01-03", event: "Warm intro from Bain talent team"}]) },
     { name: "Elena Vasquez", title: "VP Operations", company: "LogiCore Supply Chain (Advent International)", location: "Dallas, TX", email: "evasquez@logicore.com", phone: "(214) 555-0295", linkedin: "linkedin.com/in/elenavasquez-ops", matchScore: 86, status: "sourced", lastContact: "2025-01-11", tags: JSON.stringify(["Supply Chain", "Lean Manufacturing", "ERP Implementation", "Carve-out"]), notes: "Managed $500M supply chain network. Led successful SAP implementation across 8 facilities.", timeline: JSON.stringify([{date: "2025-01-11", event: "Added to pipeline from logistics conference"}]) },
     { name: "Derek Thompson", title: "COO", company: "Apex Dental Partners (KKR)", location: "Nashville, TN", email: "dthompson@apexdental.com", phone: "(615) 555-0847", linkedin: "linkedin.com/in/derekthompson-coo", matchScore: 89, status: "contacted", lastContact: "2025-01-13", tags: JSON.stringify(["Multi-site Healthcare", "M&A Integration", "Operational Playbook", "PE-backed"]), notes: "Integrated 25 dental practice acquisitions in 18 months. Expert at PE roll-up operations.", timeline: JSON.stringify([{date: "2025-01-13", event: "Email outreach — interested in exploring"}, {date: "2025-01-10", event: "Sourced via healthcare PE network"}]) },
-
     // === CHRO / VP People ===
     { name: "Diana Foster", title: "CHRO", company: "TalentForge (Vista Equity)", location: "Chicago, IL", email: "dfoster@talentforge.io", phone: "(312) 555-0156", linkedin: "linkedin.com/in/dianafoster-chro", matchScore: 90, status: "screening", lastContact: "2025-01-14", tags: JSON.stringify(["PE Talent Strategy", "M&A Integration", "Comp Design", "Culture Transformation"]), notes: "Redesigned comp and equity structure across Vista's entire portfolio playbook. SHRM board member.", timeline: JSON.stringify([{date: "2025-01-14", event: "Phone screen — outstanding cultural perspective"}, {date: "2025-01-09", event: "Reached out — very interested"}]) },
     { name: "Ryan Mitchell", title: "VP People", company: "CloudReach SaaS (Thoma Bravo)", location: "Denver, CO", email: "rmitchell@cloudreach.com", phone: "(720) 555-0538", linkedin: "linkedin.com/in/ryanmitchell-people", matchScore: 84, status: "sourced", lastContact: "2025-01-10", tags: JSON.stringify(["Tech Recruiting", "HRIS", "Remote Culture", "Hypergrowth"]), notes: "Scaled CloudReach from 80 to 400 employees in 2 years. Built world-class remote-first culture.", timeline: JSON.stringify([{date: "2025-01-10", event: "Sourced from HR tech conference"}]) },
-
     // === CMO / VP Marketing ===
     { name: "Jordan Blake", title: "CMO", company: "NovaBrands Consumer (L Catterton)", location: "Los Angeles, CA", email: "jblake@novabrands.com", phone: "(310) 555-0724", linkedin: "linkedin.com/in/jordanblake-cmo", matchScore: 89, status: "interview", lastContact: "2025-01-15", tags: JSON.stringify(["DTC Marketing", "Brand Strategy", "Growth Marketing", "PE-backed"]), notes: "Grew NovaBrands portfolio from $40M to $180M revenue through digital-first brand strategy.", timeline: JSON.stringify([{date: "2025-01-15", event: "Interview with CEO — strong brand vision"}, {date: "2025-01-10", event: "First call — excellent strategic thinker"}, {date: "2025-01-06", event: "Referral from L Catterton partner"}]) },
     { name: "Aisha Patel", title: "VP Marketing", company: "ScaleUp Fintech", location: "New York, NY", email: "apatel@scaleupft.com", phone: "(212) 555-0419", linkedin: "linkedin.com/in/aishapatel-mktg", matchScore: 85, status: "contacted", lastContact: "2025-01-12", tags: JSON.stringify(["B2B SaaS", "Demand Gen", "Product Marketing", "PLG"]), notes: "Built product-led growth engine that drives 60% of pipeline. HubSpot and Stripe alumni.", timeline: JSON.stringify([{date: "2025-01-12", event: "Email outreach — awaiting response"}, {date: "2025-01-08", event: "Identified via fintech marketing network"}]) },
     { name: "Carlos Mendez", title: "CMO", company: "VitalFit Wellness (TSG Consumer)", location: "Austin, TX", email: "cmendez@vitalfit.com", phone: "(512) 555-0863", linkedin: "linkedin.com/in/carlosmendez-cmo", matchScore: 87, status: "sourced", lastContact: "2025-01-09", tags: JSON.stringify(["Consumer Wellness", "Omnichannel", "Influencer Strategy", "DTC"]), notes: "Led VitalFit rebrand that doubled brand awareness. Deep DTC and retail channel expertise.", timeline: JSON.stringify([{date: "2025-01-09", event: "Added from consumer PE conference connections"}]) },
-
     // === General Counsel / CLO ===
     { name: "Natalie Chen-Watkins", title: "General Counsel", company: "ShieldTech Compliance (Warburg Pincus)", location: "Washington, DC", email: "ncwatkins@shieldtech.com", phone: "(202) 555-0352", linkedin: "linkedin.com/in/nataliecwatkins-gc", matchScore: 87, status: "screening", lastContact: "2025-01-13", tags: JSON.stringify(["M&A Transactions", "Regulatory Compliance", "IP Portfolio", "PE Transactions"]), notes: "Managed legal for 8 PE acquisitions. Deep regulatory expertise in tech and healthcare.", timeline: JSON.stringify([{date: "2025-01-13", event: "Screening call — impressive M&A depth"}, {date: "2025-01-08", event: "Referred by Warburg legal team"}]) },
     { name: "Thomas Grant", title: "VP Legal & Compliance", company: "Apex Digital Media (Silver Lake)", location: "New York, NY", email: "tgrant@apexdigital.com", phone: "(212) 555-0687", linkedin: "linkedin.com/in/thomasgrant-legal", matchScore: 82, status: "sourced", lastContact: "2025-01-07", tags: JSON.stringify(["Digital Media", "Data Privacy", "IP Licensing", "Corporate Governance"]), notes: "Kirkland & Ellis background. Led GDPR/CCPA compliance buildout across Silver Lake portfolio.", timeline: JSON.stringify([{date: "2025-01-07", event: "Added from legal network sourcing"}]) },
-
     // === CEO / President ===
     { name: "Katherine Novak", title: "President & COO", company: "Meridian Industries (KKR)", location: "Atlanta, GA", email: "knovak@meridianind.com", phone: "(404) 555-0918", linkedin: "linkedin.com/in/katherinenovak", matchScore: 94, status: "interview", lastContact: "2025-01-15", tags: JSON.stringify(["P&L Ownership", "PE Value Creation", "Board Management", "Scale-up"]), notes: "Grew Meridian from $120M to $450M revenue. KKR wants to promote her but she's exploring external CEO roles.", timeline: JSON.stringify([{date: "2025-01-15", event: "CEO-track interview with PE board"}, {date: "2025-01-10", event: "Strategy presentation — outstanding"}, {date: "2025-01-04", event: "Confidential intro via KKR talent"}]) },
   ];
   for (const c of candidateData) {
-    db.insert(candidates).values(c).run();
+    await db.insert(candidates).values(c);
   }
 
   // Jobs - Multi-function executive searches
   const jobData: InsertJob[] = [
-    // CFO searches
     { title: "Chief Financial Officer", company: "Acme Health Solutions (Thoma Bravo)", location: "Chicago, IL", stage: "interview", candidateCount: 24, daysOpen: 28, feePotential: "$125,000", description: "PE-backed healthcare IT company seeking CFO to lead finance through rapid scaling. $400M revenue, preparing for potential exit in 18-24 months.", requirements: JSON.stringify(["10+ years senior finance leadership", "PE-backed company experience", "Healthcare or SaaS background", "M&A integration experience", "IPO or exit preparation"]) },
     { title: "CFO", company: "Granite Peak Energy (Warburg Pincus)", location: "Dallas, TX", stage: "screening", candidateCount: 15, daysOpen: 21, feePotential: "$150,000", description: "Energy infrastructure company backed by Warburg Pincus. $1.8B in assets, managing complex capital allocation across 40+ facilities.", requirements: JSON.stringify(["Energy/infrastructure background", "Capital project oversight", "PE reporting experience", "Treasury management"]) },
     { title: "VP Finance", company: "Nexus Cloud (Vista Equity)", location: "Austin, TX", stage: "sourcing", candidateCount: 8, daysOpen: 7, feePotential: "$85,000", description: "High-growth B2B SaaS company needs VP Finance to build FP&A function. $120M ARR, growing 40% YoY.", requirements: JSON.stringify(["SaaS metrics expertise", "FP&A team leadership", "Board-level reporting", "Series D+ experience"]) },
-    // CTO searches
     { title: "Chief Technology Officer", company: "BrightPath Health (General Atlantic)", location: "Boston, MA", stage: "interview", candidateCount: 18, daysOpen: 32, feePotential: "$140,000", description: "Healthcare SaaS platform needs CTO to lead AI-driven product roadmap and engineering scaling. $200M ARR.", requirements: JSON.stringify(["AI/ML product leadership", "Healthcare technology experience", "Engineering team of 100+", "Cloud-native architecture", "PE board reporting"]) },
     { title: "VP Engineering", company: "Velocity Commerce (Insight Partners)", location: "San Francisco, CA", stage: "sourcing", candidateCount: 6, daysOpen: 10, feePotential: "$95,000", description: "E-commerce infrastructure platform seeking VP Engineering for platform reliability and scale. 500M+ API calls/day.", requirements: JSON.stringify(["High-scale distributed systems", "E-commerce/payments experience", "Team scaling 50→200", "SRE and platform engineering"]) },
-    // COO searches
     { title: "Chief Operating Officer", company: "CarePoint Health Network (Bain Capital)", location: "Nashville, TN", stage: "screening", candidateCount: 12, daysOpen: 18, feePotential: "$130,000", description: "Multi-site healthcare services company seeking COO for operational excellence across 60 clinics. PE roll-up strategy.", requirements: JSON.stringify(["Multi-site healthcare operations", "PE roll-up integration", "Process standardization", "EBITDA improvement track record"]) },
-    // CHRO search
     { title: "Chief Human Resources Officer", company: "Pinnacle Consumer Brands (L Catterton)", location: "Los Angeles, CA", stage: "intake", candidateCount: 0, daysOpen: 3, feePotential: "$100,000", description: "PE-backed DTC consumer brand portfolio needs CHRO to build talent function across 4 brands and 800 employees.", requirements: JSON.stringify(["Multi-brand talent strategy", "PE-backed company experience", "Compensation and equity design", "Culture integration post-M&A"]) },
-    // CMO search
     { title: "Chief Marketing Officer", company: "VitalWell Consumer Health (TSG Consumer)", location: "Austin, TX", stage: "interview", candidateCount: 14, daysOpen: 25, feePotential: "$110,000", description: "Consumer health brand portfolio seeking CMO to drive DTC and retail growth. $300M revenue across 3 brands.", requirements: JSON.stringify(["DTC and retail marketing", "Consumer health/wellness", "Brand portfolio management", "Growth marketing and analytics"]) },
-    // GC search
     { title: "General Counsel", company: "CyberVault Security (Thoma Bravo)", location: "Washington, DC", stage: "sourcing", candidateCount: 4, daysOpen: 8, feePotential: "$90,000", description: "Enterprise cybersecurity company needs GC for M&A, government contracts, and regulatory compliance.", requirements: JSON.stringify(["Technology M&A experience", "Government contract law", "Data privacy / cybersecurity regulation", "PE transaction support"]) },
-    // CEO search
     { title: "Chief Executive Officer", company: "Apex Manufacturing (Carve-out from Honeywell / KKR)", location: "Atlanta, GA", stage: "offer", candidateCount: 22, daysOpen: 55, feePotential: "$200,000", description: "PE carve-out from Fortune 500 seeking CEO to lead standalone company through value creation plan. $600M revenue.", requirements: JSON.stringify(["P&L ownership $500M+", "Carve-out / standalone experience", "Manufacturing/industrial background", "PE board collaboration", "Track record of EBITDA growth"]) },
-    // Additional searches
     { title: "Chief Financial Officer", company: "Heritage Hospitality (Ares Management)", location: "Atlanta, GA", stage: "interview", candidateCount: 20, daysOpen: 35, feePotential: "$120,000", description: "Multi-unit hospitality company with 85 locations. PE-backed franchise model needing CFO for national expansion.", requirements: JSON.stringify(["Multi-unit operations finance", "Franchise model expertise", "EBITDA growth track record", "Real estate finance"]) },
     { title: "VP Operations", company: "MedEquip Logistics (Advent International)", location: "Minneapolis, MN", stage: "intake", candidateCount: 0, daysOpen: 1, feePotential: "$75,000", description: "Medical equipment distribution company seeking VP Ops to optimize nationwide logistics network.", requirements: JSON.stringify(["Supply chain / logistics", "Healthcare distribution", "Warehouse management systems", "Process improvement"]) },
   ];
   for (const j of jobData) {
-    db.insert(jobs).values(j).run();
+    await db.insert(jobs).values(j);
   }
 
-  // Opportunities - BD pipeline (already multi-function, minor updates)
+  // Opportunities
   const oppData: InsertOpportunity[] = [
     { company: "Blackstone Growth", contactPerson: "Mark Sullivan, Partner", estimatedFee: "$250,000", stage: "negotiation", aiScore: "hot", lastActivity: "2025-01-15", notes: "Multi-search engagement for 3 portfolio companies — CFO, CTO, and COO roles. Final contract review.", winProbability: 85 },
     { company: "Silver Lake Partners", contactPerson: "Diana Wu, Talent Lead", estimatedFee: "$180,000", stage: "proposal", aiScore: "hot", lastActivity: "2025-01-14", notes: "Proposal sent for CTO + VP Engineering dual search. Competing with Russell Reynolds.", winProbability: 65 },
@@ -207,10 +349,10 @@ function seed() {
     { company: "KKR", contactPerson: "Emma Williams, Talent", estimatedFee: "$310,000", stage: "qualified", aiScore: "warm", lastActivity: "2025-01-11", notes: "CEO search for Apex Manufacturing carve-out plus CFO for EdTech platform. Building relationship.", winProbability: 40 },
   ];
   for (const o of oppData) {
-    db.insert(opportunities).values(o).run();
+    await db.insert(opportunities).values(o);
   }
 
-  // Campaigns - Multi-function
+  // Campaigns
   const campaignData: InsertCampaign[] = [
     { name: "C-Suite Healthcare & Tech Outreach Q1", channel: "email", status: "active", sentCount: 245, openRate: 68.5, replyRate: 22.3, steps: JSON.stringify([{day: 1, type: "Email", subject: "Executive opportunity in PE-backed healthcare/tech", sent: 245, opened: 168, replied: 55, bounced: 5}, {day: 3, type: "LinkedIn", subject: "Connection request + note", sent: 220, opened: 0, replied: 44, bounced: 0}, {day: 5, type: "Email", subject: "Follow-up with role details", sent: 175, opened: 124, replied: 28, bounced: 2}, {day: 7, type: "Phone", subject: "Direct call", sent: 72, opened: 0, replied: 35, bounced: 0}]) },
     { name: "Executive SaaS Pipeline", channel: "linkedin", status: "active", sentCount: 134, openRate: 72.1, replyRate: 18.7, steps: JSON.stringify([{day: 1, type: "LinkedIn", subject: "InMail — CTO/VP Eng/VP Finance roles", sent: 134, opened: 0, replied: 25, bounced: 0}, {day: 4, type: "Email", subject: "Detailed role overview", sent: 108, opened: 82, replied: 18, bounced: 3}, {day: 7, type: "Email", subject: "Company culture piece", sent: 88, opened: 61, replied: 12, bounced: 0}]) },
@@ -220,10 +362,10 @@ function seed() {
     { name: "Placed Executive Alumni Network", channel: "email", status: "active", sentCount: 68, openRate: 81.0, replyRate: 45.2, steps: JSON.stringify([{day: 1, type: "Email", subject: "Check-in from Andrew", sent: 68, opened: 55, replied: 31, bounced: 0}, {day: 30, type: "Email", subject: "Quarterly market update", sent: 62, opened: 50, replied: 24, bounced: 0}]) },
   ];
   for (const c of campaignData) {
-    db.insert(campaigns).values(c).run();
+    await db.insert(campaigns).values(c);
   }
 
-  // Activities - Multi-function
+  // Activities
   const activityData: InsertActivity[] = [
     { type: "interview", description: "Second interview scheduled with Sarah Chen for Acme Health CFO role", timestamp: "2025-01-15T14:30:00", relatedName: "Sarah Chen" },
     { type: "interview", description: "Technical deep-dive with Alex Rivera for BrightPath Health CTO position", timestamp: "2025-01-15T13:00:00", relatedName: "Alex Rivera" },
@@ -237,21 +379,21 @@ function seed() {
     { type: "email", description: "Outreach to Natalie Chen-Watkins for General Counsel search — Warburg referral", timestamp: "2025-01-12T09:00:00", relatedName: "Natalie Chen-Watkins" },
   ];
   for (const a of activityData) {
-    db.insert(activities).values(a).run();
+    await db.insert(activities).values(a);
   }
 
-  // Interviews - Interview Intelligence seed data
+  // Interviews
   const interviewData: InsertInterview[] = [
     { candidateId: 1, candidateName: "Sarah Chen", candidateTitle: "CFO", jobTitle: "Chief Financial Officer", jobCompany: "Acme Health Solutions", interviewType: "final", interviewDate: "2025-01-14", interviewer: "David Kim, CEO", duration: 75, overallRating: 5, notes: "Exceptional interview. Sarah demonstrated deep understanding of PE-backed healthcare finance. Presented a 90-day plan that impressed the board. Strong chemistry with CEO.", strengths: JSON.stringify(["PE reporting and board management", "Healthcare industry expertise", "Strategic financial planning", "Clear communicator — articulate and concise"]), concerns: JSON.stringify(["Currently in a larger organization — may need to adjust to leaner team"]), salaryDiscussed: "$400K-$450K base + equity participation. Current comp at $380K.", nextSteps: "Prepare offer letter. Target $425K base + 1% equity.", recommendation: "advance" },
-    { candidateId: 5, candidateName: "Alex Rivera", candidateTitle: "CTO", jobTitle: "Chief Technology Officer", jobCompany: "BrightPath Health", interviewType: "technical", interviewDate: "2025-01-15", interviewer: "Engineering Committee (3 panelists)", duration: 120, overallRating: 4, notes: "Technical deep-dive went very well. Alex whiteboarded a migration architecture from monolith to microservices that was well-received. Strong AI/ML knowledge. Panel was impressed with his scaling experience at Google.", strengths: JSON.stringify(["Cloud architecture — deep AWS and GCP experience", "AI/ML product integration — built 3 ML products", "Team scaling — grew eng from 12 to 85", "Pragmatic approach to technical debt"]), concerns: JSON.stringify(["Has not worked in healthcare-regulated environment before", "Compensation expectations may be high given SF market"]), salaryDiscussed: "Expecting $350K-$400K total. Current total comp ~$380K (base + RSUs at DataPulse).", nextSteps: "Schedule final interview with PE operating partner. Prepare healthcare compliance briefing.", recommendation: "advance" },
-    { candidateId: 8, candidateName: "Marcus Williams", candidateTitle: "COO", jobTitle: "Chief Operating Officer", jobCompany: "CarePoint Health Network", interviewType: "pe_partner", interviewDate: "2025-01-14", interviewer: "James Reed, Bain Capital Operating Partner", duration: 60, overallRating: 5, notes: "Outstanding session. Marcus presented his EBITDA improvement playbook from HealthBridge — 35% margin improvement across 40 locations. Bain partner was highly impressed with his systematic approach to operational transformation.", strengths: JSON.stringify(["Proven PE value creation — 35% EBITDA improvement", "Multi-site healthcare operations expert", "McKinsey framework plus hands-on execution", "Strong relationship builder with clinical teams"]), concerns: JSON.stringify([]), salaryDiscussed: "$325K-$375K range discussed. Open to performance-based equity upside.", nextSteps: "Bain partner wants to move to offer. Discuss comp package and start date.", recommendation: "advance" },
-    { candidateId: 13, candidateName: "Jordan Blake", candidateTitle: "CMO", jobTitle: "Chief Marketing Officer", jobCompany: "VitalWell Consumer Health", interviewType: "first_round", interviewDate: "2025-01-15", interviewer: "Amanda Torres, CEO", duration: 60, overallRating: 4, notes: "Strong first impression. Jordan's DTC brand portfolio at NovaBrands is directly relevant. Presented a case study of growing a wellness brand from $8M to $45M in 2 years. CEO liked the data-driven marketing approach.", strengths: JSON.stringify(["DTC growth marketing — proven at scale", "Consumer health/wellness domain expertise", "Data-driven decision making", "Strong team leadership — built 25-person marketing team"]), concerns: JSON.stringify(["Retail/wholesale channel experience is thinner", "May need to adjust to PE reporting cadence"]), salaryDiscussed: "Looking for $280K-$320K base. Current at $275K + bonus.", nextSteps: "Schedule second round with PE partner and VP Sales.", recommendation: "advance" },
-    { candidateId: 11, candidateName: "Diana Foster", candidateTitle: "CHRO", jobTitle: "Chief Human Resources Officer", jobCompany: "Pinnacle Consumer Brands", interviewType: "phone_screen", interviewDate: "2025-01-14", interviewer: "Andrew (The Hiring Advisors)", duration: 45, overallRating: 5, notes: "Phenomenal candidate. Diana redesigned Vista Equity's entire portfolio comp structure. She understands PE talent strategy at a deep level. SHRM board member — brings industry credibility.", strengths: JSON.stringify(["PE portfolio-wide talent strategy", "Comp and equity design expertise", "Culture transformation through M&A", "Strong executive presence and credibility"]), concerns: JSON.stringify(["Consumer brands is a new vertical for her — has been in tech/SaaS"]), salaryDiscussed: "Targeting $300K+ base. Currently at $310K at TalentForge.", nextSteps: "Present to Pinnacle CEO. Prepare industry transition narrative.", recommendation: "advance" },
-    { candidateId: 7, candidateName: "James Liu", candidateTitle: "CTO", jobTitle: "VP Engineering", jobCompany: "Velocity Commerce", interviewType: "phone_screen", interviewDate: "2025-01-12", interviewer: "Andrew (The Hiring Advisors)", duration: 30, overallRating: 3, notes: "Good technical background but may be overqualified for VP Eng role — he's a current CTO. Seemed more interested in CTO positions. Worth considering for BrightPath Health CTO instead.", strengths: JSON.stringify(["Strong fintech infrastructure experience", "SOC2/PCI compliance expertise", "Microservices architecture"]), concerns: JSON.stringify(["Overqualified for VP Eng — looking for CTO title", "May not stay long in a step-down role"]), salaryDiscussed: "Not discussed in detail — wants to understand role level first.", nextSteps: "Redirect to BrightPath Health CTO opportunity. Follow up next week.", recommendation: "hold" },
+    { candidateId: 5, candidateName: "Alex Rivera", candidateTitle: "CTO", jobTitle: "Chief Technology Officer", jobCompany: "BrightPath Health", interviewType: "technical", interviewDate: "2025-01-15", interviewer: "Engineering Committee (3 panelists)", duration: 120, overallRating: 4, notes: "Technical deep-dive went very well. Alex whiteboarded a migration architecture from monolith to microservices that was well-received. Strong AI/ML knowledge.", strengths: JSON.stringify(["Cloud architecture — deep AWS and GCP experience", "AI/ML product integration — built 3 ML products", "Team scaling — grew eng from 12 to 85", "Pragmatic approach to technical debt"]), concerns: JSON.stringify(["Has not worked in healthcare-regulated environment before", "Compensation expectations may be high given SF market"]), salaryDiscussed: "Expecting $350K-$400K total. Current total comp ~$380K (base + RSUs at DataPulse).", nextSteps: "Schedule final interview with PE operating partner. Prepare healthcare compliance briefing.", recommendation: "advance" },
+    { candidateId: 8, candidateName: "Marcus Williams", candidateTitle: "COO", jobTitle: "Chief Operating Officer", jobCompany: "CarePoint Health Network", interviewType: "pe_partner", interviewDate: "2025-01-14", interviewer: "James Reed, Bain Capital Operating Partner", duration: 60, overallRating: 5, notes: "Outstanding session. Marcus presented his EBITDA improvement playbook from HealthBridge — 35% margin improvement across 40 locations. Bain partner was highly impressed.", strengths: JSON.stringify(["Proven PE value creation — 35% EBITDA improvement", "Multi-site healthcare operations expert", "McKinsey framework plus hands-on execution", "Strong relationship builder with clinical teams"]), concerns: JSON.stringify([]), salaryDiscussed: "$325K-$375K range discussed. Open to performance-based equity upside.", nextSteps: "Bain partner wants to move to offer. Discuss comp package and start date.", recommendation: "advance" },
+    { candidateId: 13, candidateName: "Jordan Blake", candidateTitle: "CMO", jobTitle: "Chief Marketing Officer", jobCompany: "VitalWell Consumer Health", interviewType: "first_round", interviewDate: "2025-01-15", interviewer: "Amanda Torres, CEO", duration: 60, overallRating: 4, notes: "Strong first impression. Jordan's DTC brand portfolio at NovaBrands is directly relevant. Presented a case study of growing a wellness brand from $8M to $45M in 2 years.", strengths: JSON.stringify(["DTC growth marketing — proven at scale", "Consumer health/wellness domain expertise", "Data-driven decision making", "Strong team leadership — built 25-person marketing team"]), concerns: JSON.stringify(["Retail/wholesale channel experience is thinner", "May need to adjust to PE reporting cadence"]), salaryDiscussed: "Looking for $280K-$320K base. Current at $275K + bonus.", nextSteps: "Schedule second round with PE partner and VP Sales.", recommendation: "advance" },
+    { candidateId: 11, candidateName: "Diana Foster", candidateTitle: "CHRO", jobTitle: "Chief Human Resources Officer", jobCompany: "Pinnacle Consumer Brands", interviewType: "phone_screen", interviewDate: "2025-01-14", interviewer: "Andrew (The Hiring Advisors)", duration: 45, overallRating: 5, notes: "Phenomenal candidate. Diana redesigned Vista Equity's entire portfolio comp structure. She understands PE talent strategy at a deep level. SHRM board member.", strengths: JSON.stringify(["PE portfolio-wide talent strategy", "Comp and equity design expertise", "Culture transformation through M&A", "Strong executive presence and credibility"]), concerns: JSON.stringify(["Consumer brands is a new vertical for her — has been in tech/SaaS"]), salaryDiscussed: "Targeting $300K+ base. Currently at $310K at TalentForge.", nextSteps: "Present to Pinnacle CEO. Prepare industry transition narrative.", recommendation: "advance" },
+    { candidateId: 7, candidateName: "James Liu", candidateTitle: "CTO", jobTitle: "VP Engineering", jobCompany: "Velocity Commerce", interviewType: "phone_screen", interviewDate: "2025-01-12", interviewer: "Andrew (The Hiring Advisors)", duration: 30, overallRating: 3, notes: "Good technical background but may be overqualified for VP Eng role — he's a current CTO. Seemed more interested in CTO positions.", strengths: JSON.stringify(["Strong fintech infrastructure experience", "SOC2/PCI compliance expertise", "Microservices architecture"]), concerns: JSON.stringify(["Overqualified for VP Eng — looking for CTO title", "May not stay long in a step-down role"]), salaryDiscussed: "Not discussed in detail — wants to understand role level first.", nextSteps: "Redirect to BrightPath Health CTO opportunity. Follow up next week.", recommendation: "hold" },
   ];
   for (const iv of interviewData) {
-    db.insert(interviews).values(iv).run();
+    await db.insert(interviews).values(iv);
   }
 }
 
-seed();
+seed().catch(console.error);

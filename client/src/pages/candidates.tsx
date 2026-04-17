@@ -40,6 +40,12 @@ import {
   FileText,
   Plus,
   Filter,
+  RefreshCw,
+  ArrowUpRight,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -642,7 +648,18 @@ export default function Candidates() {
                         {candidate.status}
                       </Badge>
                     </td>
-                    <td className="px-4 py-2.5 text-muted-foreground text-xs hidden lg:table-cell">{candidate.lastContact}</td>
+                    <td className="px-4 py-2.5 hidden lg:table-cell">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-muted-foreground text-xs">{candidate.lastContact}</span>
+                        {candidate.linkedin && (
+                          <LinkedInSyncBadge
+                            syncedAt={(candidate as any).linkedinSyncedAt}
+                            changes={(candidate as any).linkedinChanges}
+                            compact
+                          />
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1">
                         <Button
@@ -693,8 +710,68 @@ export default function Candidates() {
 
 // ─── Candidate Detail ─────────────────────────────────────────────────────────
 
+// ─── LinkedIn sync helpers ────────────────────────────────────────────────────
+
+interface ProfileChange {
+  field: string;
+  label: string;
+  oldValue: string;
+  newValue: string;
+  detectedAt: string;
+}
+
+function useSyncAge(syncedAt: string | null | undefined) {
+  if (!syncedAt) return null;
+  const ms = Date.now() - new Date(syncedAt).getTime();
+  const days = Math.floor(ms / 86_400_000);
+  if (days === 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 14) return `${days}d ago`;
+  return `${Math.floor(days / 7)}w ago`;
+}
+
+function LinkedInSyncBadge({
+  syncedAt,
+  changes,
+  compact = false,
+}: {
+  syncedAt?: string | null;
+  changes?: string | null;
+  compact?: boolean;
+}) {
+  const age = useSyncAge(syncedAt);
+  let parsedChanges: ProfileChange[] = [];
+  try { if (changes) parsedChanges = JSON.parse(changes); } catch {}
+  const hasChanges = parsedChanges.length > 0;
+
+  if (!syncedAt) {
+    return compact ? null : (
+      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+        <Clock size={10} /> Never synced
+      </span>
+    );
+  }
+
+  if (hasChanges) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+        <ArrowUpRight size={10} />
+        {compact ? parsedChanges.length : `${parsedChanges.length} change${parsedChanges.length > 1 ? "s" : ""}`}
+      </span>
+    );
+  }
+
+  return compact ? null : (
+    <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+      <CheckCircle2 size={10} className="text-green-500" /> Synced {age}
+    </span>
+  );
+}
+
+// ─── CandidateDetail ─────────────────────────────────────────────────────────
+
 function CandidateDetail({
-  candidate,
+  candidate: initialCandidate,
   onClose,
   onStatusUpdated,
 }: {
@@ -703,11 +780,17 @@ function CandidateDetail({
   onStatusUpdated: (updated: Candidate) => void;
 }) {
   const { toast } = useToast();
+  const [candidate, setCandidate] = useState<Candidate>(initialCandidate);
+
   const tags: string[] = (() => {
     try { return JSON.parse(candidate.tags); } catch { return []; }
   })();
   const timeline: { date: string; event: string }[] = (() => {
     try { return JSON.parse(candidate.timeline); } catch { return []; }
+  })();
+  const linkedinChanges: ProfileChange[] = (() => {
+    try { return candidate.linkedinChanges ? JSON.parse(candidate.linkedinChanges) : []; }
+    catch { return []; }
   })();
 
   const statusMutation = useMutation({
@@ -717,11 +800,40 @@ function CandidateDetail({
     },
     onSuccess: (updated: Candidate) => {
       queryClient.invalidateQueries({ queryKey: ["/api/candidates"] });
+      setCandidate(updated);
       onStatusUpdated(updated);
       toast({ title: "Status updated", description: `Candidate moved to ${updated.status}.` });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/linkedin-sync/candidate/${candidate.id}`);
+      return res.json() as Promise<{ result: { status: string; changes: ProfileChange[] }; candidate: Candidate }>;
+    },
+    onSuccess: ({ result, candidate: updated }) => {
+      setCandidate(updated);
+      queryClient.invalidateQueries({ queryKey: ["/api/candidates"] });
+      if (result.status === "updated") {
+        toast({
+          title: "Profile updated",
+          description: `${result.changes.length} change${result.changes.length > 1 ? "s" : ""} detected and applied.`,
+        });
+      } else if (result.status === "unchanged") {
+        toast({ title: "No changes", description: "LinkedIn profile is up to date." });
+      } else {
+        toast({
+          title: "Sync skipped",
+          description: result.error || "No data source available. Add PROXYCURL_API_KEY for live sync.",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (err: Error) => {
+      toast({ title: "Sync failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -793,12 +905,71 @@ function CandidateDetail({
             <Phone size={13} />
             <span>{candidate.phone}</span>
           </div>
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Linkedin size={13} />
-            <span>{candidate.linkedin}</span>
-          </div>
+          {/* LinkedIn row with sync status */}
+          {candidate.linkedin && (
+            <div className="flex items-start gap-2">
+              <Linkedin size={13} className="text-muted-foreground mt-0.5 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <a
+                  href={candidate.linkedin.startsWith("http") ? candidate.linkedin : `https://${candidate.linkedin}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary hover:underline truncate block text-sm"
+                >
+                  {candidate.linkedin.replace(/https?:\/\/(www\.)?linkedin\.com\/in\//, "")}
+                </a>
+                <LinkedInSyncBadge
+                  syncedAt={candidate.linkedinSyncedAt}
+                  changes={candidate.linkedinChanges}
+                />
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 w-6 p-0 shrink-0"
+                onClick={() => syncMutation.mutate()}
+                disabled={syncMutation.isPending}
+                title="Sync LinkedIn profile now"
+                data-testid="button-linkedin-sync"
+              >
+                <RefreshCw size={11} className={syncMutation.isPending ? "animate-spin" : ""} />
+              </Button>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* LinkedIn Profile Changes */}
+      {linkedinChanges.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold flex items-center gap-1.5">
+            <History size={13} className="text-amber-500" />
+            Profile Changes Detected
+          </h3>
+          <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/10 divide-y divide-amber-100 dark:divide-amber-800/50">
+            {linkedinChanges.slice(0, 8).map((change, i) => (
+              <div key={i} className="px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">{change.label}</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {new Date(change.detectedAt).toLocaleDateString()}
+                  </span>
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs line-through text-muted-foreground">{change.oldValue}</span>
+                  <ArrowUpRight size={10} className="text-amber-500 shrink-0" />
+                  <span className="text-xs font-medium text-foreground">{change.newValue}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          {linkedinChanges.length > 8 && (
+            <p className="text-[10px] text-muted-foreground text-center">
+              + {linkedinChanges.length - 8} older changes
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Quick Actions */}
       <div className="flex gap-2">

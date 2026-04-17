@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: hirecommand
+    runtime: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: node dist/index.cjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false          # set manually in Render dashboard
+      - key: LOXO_API_KEY
+        sync: false
+      - key: APP_URL
+        sync: false          # e.g. https://hirecommand.onrender.com
+      - key: QB_CLIENT_ID
+        sync: false
+      - key: QB_CLIENT_SECRET
+        sync: false
+      - key: QB_REDIRECT_URI
+        sync: false          # e.g. https://hirecommand.onrender.com/api/qb/callback
+      - key: PROXYCURL_API_KEY
+        sync: false          # optional — for live LinkedIn sync
+      - key: GOOGLE_CSE_API_KEY
+        sync: false          # optional — for AI sourcing
+      - key: GOOGLE_CSE_CX
+        sync: false          # optional — for AI sourcing
+      - key: PDL_API_KEY
+        sync: false          # optional — for candidate enrichment

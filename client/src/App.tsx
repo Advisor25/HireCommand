@@ -21,6 +21,9 @@ import IntelligenceHub from "@/pages/intelligence-hub";
 import Settings from "@/pages/settings";
 import Interviews from "@/pages/interviews";
 import ClientPortal from "@/pages/client-portal";
+import Revenue from "@/pages/revenue";
+import Source from "@/pages/source";
+import Invoices from "@/pages/invoices";
 
 function AppRouter() {
   return (
@@ -35,7 +38,10 @@ function AppRouter() {
       <Route path="/market-intelligence" component={MarketIntelligence} />
       <Route path="/intelligence" component={IntelligenceHub} />
       <Route path="/interviews" component={Interviews} />
+      <Route path="/source" component={Source} />
       <Route path="/clients" component={ClientPortal} />
+      <Route path="/revenue" component={Revenue} />
+      <Route path="/invoices" component={Invoices} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
     </Switch>

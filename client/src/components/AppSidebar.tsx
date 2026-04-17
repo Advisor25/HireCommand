@@ -9,17 +9,21 @@ import {
   ClipboardList,
   BarChart3,
   Building2,
+  DollarSign,
   Globe,
   Radar,
   Settings,
   Sun,
   Moon,
+  Zap,
+  FileText,
 } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { href: "/source", icon: Zap, label: "Source" },
   { href: "/candidates", icon: Users, label: "Candidates" },
   { href: "/jobs", icon: Briefcase, label: "Jobs" },
   { href: "/opportunities", icon: TrendingUp, label: "Opportunities" },
@@ -27,6 +31,8 @@ const navItems = [
   { href: "/outreach", icon: Send, label: "Outreach" },
   { href: "/ai", icon: Bot, label: "AI Assistant" },
   { href: "/interviews", icon: ClipboardList, label: "Interviews" },
+  { href: "/revenue", icon: DollarSign, label: "Revenue" },
+  { href: "/invoices", icon: FileText, label: "Invoices" },
   { href: "/reports", icon: BarChart3, label: "Reports" },
   { href: "/intelligence", icon: Radar, label: "Intelligence Hub" },
   { href: "/settings", icon: Settings, label: "Settings" },

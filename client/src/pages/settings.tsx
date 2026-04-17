@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import {
   User,
@@ -23,14 +23,37 @@ import {
   RefreshCw,
   Wifi,
   WifiOff,
+  Key,
+  Plus,
+  Trash2,
+  Copy,
+  Globe,
+  Webhook,
+  Eye,
+  EyeOff,
+  Code2,
+  ExternalLink,
+  History,
+  ArrowUpRight,
+  Clock,
+  AlertCircle,
+  Info,
 } from "lucide-react";
 
 const comingSoonIntegrations = [
-  { name: "LinkedIn Recruiter", description: "Advanced recruiter seat integration" },
-  { name: "QuickBooks", description: "Invoice and billing automation" },
   { name: "Google Workspace", description: "Docs, Sheets, and Drive sync" },
   { name: "Mailchimp", description: "Email campaign management" },
+  { name: "LinkedIn Recruiter", description: "Deep seat integration with InMail and pipeline" },
 ];
+
+interface QBStatus {
+  connected: boolean;
+  companyName?: string;
+  realmId?: string;
+  lastSync?: string;
+  tokenExpiry?: string;
+  clientIdConfigured: boolean;
+}
 
 interface SyncStatus {
   lastSync: string | null;
@@ -39,9 +62,86 @@ interface SyncStatus {
   isRunning: boolean;
 }
 
+interface LinkedInSyncStatus {
+  lastSync: string | null;
+  nextSync: string | null;
+  summary: {
+    total: number;
+    updated: number;
+    unchanged: number;
+    skipped: number;
+    errors: number;
+    ranAt: string;
+  } | null;
+  stats: {
+    totalCandidates: number;
+    withLinkedIn: number;
+    neverSynced: number;
+    recentChanges: number;
+    hasProxyCurl: boolean;
+  };
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // QuickBooks
+  const { data: qbStatus } = useQuery<QBStatus>({ queryKey: ["/api/qb/status"] });
+
+  const qbSyncMutation = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", "/api/qb/sync");
+      return r.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/qb/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      const synced = data?.synced ?? 0;
+      const paid = data?.paid ?? 0;
+      toast({
+        title: "QB sync complete",
+        description: `Synced ${synced} invoice${synced !== 1 ? "s" : ""} · ${paid} marked paid`,
+      });
+    },
+    onError: (e: any) => toast({ title: "Sync failed", description: e.message, variant: "destructive" }),
+  });
+
+  const qbDisconnectMutation = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", "/api/qb/disconnect", {});
+      return r.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/qb/status"] });
+      toast({ title: "QuickBooks disconnected" });
+    },
+    onError: (e: any) => toast({ title: "Disconnect failed", description: e.message, variant: "destructive" }),
+  });
+
+  // LinkedIn Sync
+  const { data: linkedInStatus, refetch: refetchLinkedIn } = useQuery<LinkedInSyncStatus>({
+    queryKey: ["/api/linkedin-sync/status"],
+    refetchInterval: 30_000,
+  });
+
+  const linkedInSyncMutation = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", "/api/linkedin-sync/run");
+      return r.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "LinkedIn sync started",
+        description: "Checking all candidate profiles in the background. This may take a few minutes.",
+      });
+      // Refresh status after a short delay
+      setTimeout(() => refetchLinkedIn(), 5000);
+    },
+    onError: (e: any) => {
+      toast({ title: "Sync failed", description: e.message, variant: "destructive" });
+    },
+  });
 
   // Loxo state
   const [loxoApiKey, setLoxoApiKey] = useState("");
@@ -186,6 +286,57 @@ export default function Settings() {
     const d = new Date(iso);
     return d.toLocaleString();
   }
+
+  // ── API Keys state ──────────────────────────────────────────────────
+  const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyVisible, setNewKeyVisible] = useState<Record<string, boolean>>({});
+  const [newlyCreatedKey, setNewlyCreatedKey] = useState<{ id: string; key: string; name: string } | null>(null);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookEvents, setWebhookEvents] = useState<string[]>(["candidate.created", "job.stage_changed", "placement.created"]);
+
+  const { data: apiKeys = [], isLoading: keysLoading } = useQuery<Array<{
+    id: string; name: string; key: string; active: boolean; createdAt: string; lastUsed?: string;
+  }>>({ queryKey: ["/api/api-keys"] });
+
+  const createKeyMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const r = await apiRequest("POST", "/api/api-keys", { name });
+      return r.json();
+    },
+    onSuccess: (data) => {
+      setNewlyCreatedKey(data);
+      setNewKeyName("");
+      queryClient.invalidateQueries({ queryKey: ["/api/api-keys"] });
+      toast({ title: "API key created", description: "Copy it now — it won't be shown again." });
+    },
+    onError: (e: any) => toast({ title: "Failed to create key", description: e.message, variant: "destructive" }),
+  });
+
+  const revokeKeyMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const r = await apiRequest("POST", `/api/api-keys/${id}/revoke`, {});
+      return r.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/api-keys"] });
+      toast({ title: "Key revoked" });
+    },
+    onError: (e: any) => toast({ title: "Revoke failed", description: e.message, variant: "destructive" }),
+  });
+
+  function copyToClipboard(text: string, label = "Copied!") {
+    navigator.clipboard.writeText(text).then(() => toast({ title: label }));
+  }
+
+  const WEBHOOK_EVENTS = [
+    "candidate.created",
+    "candidate.updated",
+    "job.created",
+    "job.stage_changed",
+    "placement.created",
+    "placement.invoice_updated",
+    "interview.scheduled",
+  ];
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -479,6 +630,493 @@ export default function Settings() {
             <Users size={12} />
             Invite Team Member
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* API Keys */}
+      <Card className="border border-card-border">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Key size={14} />
+              API Keys
+            </CardTitle>
+            <a
+              href="/api/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-xs text-primary hover:underline"
+              data-testid="link-api-docs"
+            >
+              <Code2 size={12} />
+              View API Docs
+              <ExternalLink size={10} />
+            </a>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Generate API keys to integrate HireCommand with external tools, automations, and data sources.
+            All authenticated endpoints are documented in the interactive Swagger UI.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-5">
+
+          {/* Newly created key banner */}
+          {newlyCreatedKey && (
+            <div className="rounded-lg border border-green-300 bg-green-50 dark:bg-green-900/20 dark:border-green-700 p-4 space-y-2" data-testid="banner-new-api-key">
+              <p className="text-xs font-semibold text-green-800 dark:text-green-300 flex items-center gap-1.5">
+                <CheckCircle2 size={13} />
+                New API key created — copy it now. You won't see it again.
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-xs font-mono bg-white dark:bg-black/30 rounded px-3 py-1.5 border border-green-200 dark:border-green-700 text-green-900 dark:text-green-200 truncate">
+                  {newlyCreatedKey.key}
+                </code>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 text-xs shrink-0 border-green-300"
+                  onClick={() => copyToClipboard(newlyCreatedKey.key, "API key copied!")}
+                  data-testid="button-copy-new-key"
+                >
+                  <Copy size={12} /> Copy
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-xs text-muted-foreground shrink-0"
+                  onClick={() => setNewlyCreatedKey(null)}
+                  data-testid="button-dismiss-new-key"
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Create new key */}
+          <div className="flex gap-2">
+            <Input
+              placeholder="Key name (e.g. Zapier, n8n, Postman)"
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && newKeyName.trim() && createKeyMutation.mutate(newKeyName.trim())}
+              className="h-9 text-sm flex-1"
+              data-testid="input-new-key-name"
+            />
+            <Button
+              size="sm"
+              className="gap-1.5 text-xs shrink-0"
+              onClick={() => newKeyName.trim() && createKeyMutation.mutate(newKeyName.trim())}
+              disabled={!newKeyName.trim() || createKeyMutation.isPending}
+              data-testid="button-create-api-key"
+            >
+              {createKeyMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+              Generate Key
+            </Button>
+          </div>
+
+          {/* Key list */}
+          {keysLoading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+              <Loader2 size={12} className="animate-spin" /> Loading keys...
+            </div>
+          ) : apiKeys.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border py-6 text-center" data-testid="text-no-api-keys">
+              <Key size={24} className="mx-auto text-muted-foreground/40 mb-2" />
+              <p className="text-xs text-muted-foreground">No API keys yet. Generate one above to get started.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
+              {apiKeys.map((k) => (
+                <div key={k.id} className="flex items-center gap-3 px-4 py-3 bg-background" data-testid={`row-api-key-${k.id}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium truncate">{k.name}</p>
+                      <Badge
+                        className={`text-[10px] border-0 ${k.active ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}
+                      >
+                        {k.active ? "Active" : "Revoked"}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      <code className="text-[11px] font-mono text-muted-foreground">
+                        {newKeyVisible[k.id] ? k.key : `${k.key.slice(0, 12)}${"•".repeat(20)}`}
+                      </code>
+                      <button
+                        className="text-[11px] text-muted-foreground hover:text-foreground"
+                        onClick={() => setNewKeyVisible((prev) => ({ ...prev, [k.id]: !prev[k.id] }))}
+                        data-testid={`button-toggle-key-${k.id}`}
+                      >
+                        {newKeyVisible[k.id] ? <EyeOff size={11} /> : <Eye size={11} />}
+                      </button>
+                    </div>
+                    {k.createdAt && (
+                      <p className="text-[11px] text-muted-foreground/70 mt-0.5">
+                        Created {new Date(k.createdAt).toLocaleDateString()}
+                        {k.lastUsed ? ` · Last used ${new Date(k.lastUsed).toLocaleDateString()}` : " · Never used"}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0"
+                      onClick={() => copyToClipboard(k.key, "Key copied!")}
+                      data-testid={`button-copy-key-${k.id}`}
+                    >
+                      <Copy size={13} />
+                    </Button>
+                    {k.active && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                        onClick={() => revokeKeyMutation.mutate(k.id)}
+                        disabled={revokeKeyMutation.isPending}
+                        data-testid={`button-revoke-key-${k.id}`}
+                      >
+                        <Trash2 size={13} />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <Separator />
+
+          {/* Quick start */}
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Quick Start</p>
+            <div className="rounded-lg bg-muted/50 border border-border p-3 space-y-1">
+              <p className="text-[11px] font-mono text-muted-foreground">curl -H "X-Api-Key: hc_live_..." \</p>
+              <p className="text-[11px] font-mono text-muted-foreground pl-4">https://your-domain/api/v1/candidates</p>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              All v1 endpoints support JSON. Pass <code className="text-xs bg-muted px-1 rounded">X-Api-Key</code> as a request header.
+              Full documentation and code examples are available in the{" "}
+              <a href="/api/docs" target="_blank" className="text-primary hover:underline">Swagger UI</a>.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* QuickBooks */}
+      <Card className="border border-card-border" data-testid="card-quickbooks">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <div className="w-5 h-5 rounded bg-green-600 flex items-center justify-center flex-shrink-0">
+                <span className="text-white font-bold text-[9px]">QB</span>
+              </div>
+              QuickBooks
+            </CardTitle>
+            {qbStatus?.connected && (
+              <Badge className="text-xs border-0 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 gap-1">
+                <CheckCircle2 size={10} />
+                Connected
+              </Badge>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Sync invoices and automatically mark them paid when clients pay through QuickBooks.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {qbStatus?.connected ? (
+            <>
+              {/* Connected state */}
+              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0">
+                    <span className="font-bold text-sm text-green-700 dark:text-green-400">QB</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm">{qbStatus.companyName || "QuickBooks"}</p>
+                    {qbStatus.lastSync && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Last sync: {new Date(qbStatus.lastSync).toLocaleString()}
+                      </p>
+                    )}
+                    {qbStatus.tokenExpiry && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Token expires: {new Date(qbStatus.tokenExpiry).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    className="gap-1.5 text-xs"
+                    onClick={() => qbSyncMutation.mutate()}
+                    disabled={qbSyncMutation.isPending}
+                    data-testid="button-qb-sync-now"
+                  >
+                    {qbSyncMutation.isPending ? (
+                      <><Loader2 size={12} className="animate-spin" /> Syncing...</>
+                    ) : (
+                      <><RefreshCw size={12} /> Sync Now</>
+                    )}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 text-xs text-destructive"
+                    onClick={() => qbDisconnectMutation.mutate()}
+                    disabled={qbDisconnectMutation.isPending}
+                    data-testid="button-qb-disconnect"
+                  >
+                    {qbDisconnectMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : null}
+                    Disconnect
+                  </Button>
+                </div>
+              </div>
+
+              {/* QB Webhook URL */}
+              <div className="space-y-2">
+                <Label className="text-xs">QuickBooks Webhook URL</Label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-[11px] font-mono bg-muted/50 border border-border rounded px-3 py-2 text-muted-foreground truncate" data-testid="text-qb-webhook-url">
+                    {typeof window !== "undefined" ? window.location.origin : ""}/api/qb/webhook
+                  </code>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 text-xs shrink-0"
+                    onClick={() => {
+                      const url = `${window.location.origin}/api/qb/webhook`;
+                      navigator.clipboard.writeText(url).then(() =>
+                        toast({ title: "Webhook URL copied!" })
+                      );
+                    }}
+                    data-testid="button-copy-qb-webhook"
+                  >
+                    <Copy size={12} /> Copy
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Register this webhook URL in your{" "}
+                  <a
+                    href="https://developer.intuit.com/app/developer/qbo/docs/develop/webhooks"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    QuickBooks app settings
+                  </a>{" "}
+                  to enable real-time payment sync.
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Disconnected state */}
+              <div className="rounded-lg border border-dashed border-border py-8 flex flex-col items-center gap-4 text-center">
+                <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center">
+                  <span className="font-bold text-base text-muted-foreground">QB</span>
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Not connected to QuickBooks</p>
+                  <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                    Connect to automatically push invoices and sync payment status when clients pay.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  onClick={async () => {
+                    try {
+                      const r = await apiRequest("GET", "/api/qb/connect");
+                      const { authUrl } = await r.json();
+                      window.location.href = authUrl;
+                    } catch (e: any) {
+                      toast({ title: "Could not connect", description: e.message, variant: "destructive" });
+                    }
+                  }}
+                  data-testid="button-connect-qb-settings"
+                >
+                  <ExternalLink size={12} />
+                  Connect QuickBooks
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* LinkedIn Profile Sync */}
+      <Card className="border border-card-border">
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Linkedin size={14} />
+            LinkedIn Profile Sync
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Automatically checks every candidate's LinkedIn profile for changes every 2 weeks and updates their record.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+
+          {/* Stat row */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {([
+              { label: "With LinkedIn", value: linkedInStatus?.stats?.withLinkedIn ?? "—" },
+              { label: "Never Synced", value: linkedInStatus?.stats?.neverSynced ?? "—" },
+              { label: "Profiles Changed", value: linkedInStatus?.stats?.recentChanges ?? "—" },
+              { label: "Last Run", value: linkedInStatus?.lastSync
+                ? new Date(linkedInStatus.lastSync).toLocaleDateString()
+                : "Never" },
+            ] as { label: string; value: string | number }[]).map(({ label, value }) => (
+              <div key={label} className="rounded-lg border border-card-border bg-muted/30 p-3 text-center">
+                <p className="text-lg font-bold tabular-nums">{value}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{label}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Last sync summary */}
+          {linkedInStatus?.summary && (
+            <div className="rounded-lg border border-card-border bg-muted/20 px-3 py-2 text-xs flex flex-wrap gap-x-4 gap-y-1">
+              <span className="text-muted-foreground">Last run: <strong className="text-foreground">{new Date(linkedInStatus.summary.ranAt).toLocaleString()}</strong></span>
+              <span className="text-green-600 dark:text-green-400 font-medium">{linkedInStatus.summary.updated} updated</span>
+              <span className="text-muted-foreground">{linkedInStatus.summary.unchanged} unchanged</span>
+              <span className="text-amber-600 dark:text-amber-400">{linkedInStatus.summary.skipped} skipped</span>
+              {linkedInStatus.summary.errors > 0 && (
+                <span className="text-red-500">{linkedInStatus.summary.errors} errors</span>
+              )}
+            </div>
+          )}
+
+          {/* Next scheduled run */}
+          {linkedInStatus?.nextSync && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Clock size={11} />
+              Next automatic sync: <strong className="text-foreground ml-0.5">{new Date(linkedInStatus.nextSync).toLocaleDateString()}</strong>
+            </div>
+          )}
+
+          {/* Data source notice */}
+          <div className={`rounded-lg border px-3 py-2.5 text-xs flex items-start gap-2 ${
+            linkedInStatus?.stats?.hasProxyCurl
+              ? "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/10 text-green-700 dark:text-green-400"
+              : "border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-400"
+          }`}>
+            {linkedInStatus?.stats?.hasProxyCurl
+              ? <CheckCircle2 size={13} className="shrink-0 mt-0.5" />
+              : <AlertCircle size={13} className="shrink-0 mt-0.5" />}
+            <div>
+              {linkedInStatus?.stats?.hasProxyCurl ? (
+                <><strong>ProxyCurl connected</strong> — live LinkedIn data enabled. Profiles will reflect real-time changes.</>
+              ) : (
+                <><strong>Using Loxo as data source.</strong> For real-time LinkedIn data, add a <code className="font-mono bg-black/10 dark:bg-white/10 px-1 rounded">PROXYCURL_API_KEY</code> environment variable. Without it, sync uses Loxo-mirrored fields only.</>
+              )}
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => linkedInSyncMutation.mutate()}
+              disabled={linkedInSyncMutation.isPending}
+              data-testid="button-linkedin-sync-run"
+            >
+              <RefreshCw size={12} className={linkedInSyncMutation.isPending ? "animate-spin" : ""} />
+              {linkedInSyncMutation.isPending ? "Syncing…" : "Sync All Now"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 text-xs"
+              onClick={() => refetchLinkedIn()}
+              data-testid="button-linkedin-sync-refresh"
+            >
+              <RefreshCw size={12} /> Refresh Status
+            </Button>
+          </div>
+
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            Sync runs automatically every 14 days for all candidates with a LinkedIn URL saved.
+            Changes to title, company, location, email, or phone are detected and applied to the candidate record automatically.
+            A timeline entry is added and the change history is visible on the candidate's profile.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Webhooks */}
+      <Card className="border border-card-border">
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Webhook size={14} />
+            Webhooks
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Subscribe to real-time events. HireCommand will POST a signed JSON payload to your endpoint whenever the selected events fire.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+
+          {/* Webhook URL */}
+          <div className="space-y-1.5">
+            <Label className="text-xs">Endpoint URL</Label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Globe size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="https://your-server.com/webhooks/hirecommand"
+                  value={webhookUrl}
+                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  className="h-9 text-sm pl-8"
+                  data-testid="input-webhook-url"
+                />
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-xs shrink-0"
+                disabled={!webhookUrl.trim()}
+                onClick={() => toast({ title: "Webhook saved", description: `Subscribed to ${webhookEvents.length} events.` })}
+                data-testid="button-save-webhook"
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+
+          {/* Event selector */}
+          <div className="space-y-2">
+            <Label className="text-xs">Events to Subscribe</Label>
+            <div className="grid sm:grid-cols-2 gap-1.5">
+              {WEBHOOK_EVENTS.map((evt) => (
+                <label
+                  key={evt}
+                  className="flex items-center gap-2.5 rounded-md border border-border px-3 py-2 cursor-pointer hover:bg-muted/40"
+                  data-testid={`checkbox-webhook-${evt}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={webhookEvents.includes(evt)}
+                    onChange={(e) =>
+                      setWebhookEvents((prev) =>
+                        e.target.checked ? [...prev, evt] : prev.filter((x) => x !== evt)
+                      )
+                    }
+                    className="rounded"
+                  />
+                  <code className="text-[11px] font-mono text-muted-foreground">{evt}</code>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg bg-muted/40 border border-border p-3 text-[11px] text-muted-foreground space-y-1">
+            <p className="font-medium text-foreground text-xs">Payload signature</p>
+            <p>Every request includes an <code className="bg-muted px-1 rounded">X-HireCommand-Signature</code> header — HMAC-SHA256 of the raw body, signed with your API key. Verify on your server before processing.</p>
+          </div>
         </CardContent>
       </Card>
     </div>

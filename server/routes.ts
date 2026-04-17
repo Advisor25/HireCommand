@@ -2,6 +2,11 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertCandidateSchema, insertJobSchema, insertActivitySchema, insertInterviewSchema } from "@shared/schema";
+import { registerOpenApi } from "./openapi";
+import { registerSourcingRoutes } from "./sourcing";
+import { registerQBRoutes } from "./quickbooks";
+import { registerLinkedInSyncRoutes, checkAndRunStartupSync } from "./linkedin-sync";
+import { insertInvoiceSchema } from "@shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -150,6 +155,111 @@ export async function registerRoutes(
         placed: 3,
       },
     });
+  });
+
+  // ======================== PLACEMENTS & REVENUE ========================
+
+  // Get all placements (with their splits joined)
+  app.get("/api/placements", async (_req, res) => {
+    const all = await storage.getPlacements();
+    // Attach splits to each placement
+    const result = await Promise.all(
+      all.map(async (p) => ({
+        ...p,
+        splits: await storage.getSplitsForPlacement(p.id),
+      }))
+    );
+    res.json(result);
+  });
+
+  // Get single placement
+  app.get("/api/placements/:id", async (req, res) => {
+    const p = await storage.getPlacement(Number(req.params.id));
+    if (!p) return res.status(404).json({ error: "Not found" });
+    const splits = await storage.getSplitsForPlacement(p.id);
+    res.json({ ...p, splits });
+  });
+
+  // Create placement
+  app.post("/api/placements", async (req, res) => {
+    const { splits, ...data } = req.body;
+    const p = await storage.createPlacement(data);
+    if (splits?.length) {
+      await storage.upsertSplitsForPlacement(p.id, splits);
+    }
+    const freshSplits = await storage.getSplitsForPlacement(p.id);
+    res.status(201).json({ ...p, splits: freshSplits });
+  });
+
+  // Update placement
+  app.patch("/api/placements/:id", async (req, res) => {
+    const { splits, ...data } = req.body;
+    const p = await storage.updatePlacement(Number(req.params.id), data);
+    if (!p) return res.status(404).json({ error: "Not found" });
+    if (splits !== undefined) {
+      await storage.upsertSplitsForPlacement(p.id, splits);
+    }
+    const freshSplits = await storage.getSplitsForPlacement(p.id);
+    res.json({ ...p, splits: freshSplits });
+  });
+
+  // Delete placement
+  app.delete("/api/placements/:id", async (req, res) => {
+    await storage.deletePlacement(Number(req.params.id));
+    res.json({ ok: true });
+  });
+
+  // Upsert splits for a placement
+  app.put("/api/placements/:id/splits", async (req, res) => {
+    const { splits } = req.body;
+    const updated = await storage.upsertSplitsForPlacement(Number(req.params.id), splits);
+    res.json(updated);
+  });
+
+  // Per-employee commission export (JSON — frontend converts to CSV)
+  app.get("/api/commissions/employee/:name", async (req, res) => {
+    const employee = decodeURIComponent(req.params.name);
+    const splits = await storage.getSplitsForEmployee(employee);
+    // Enrich with placement details
+    const rows = await Promise.all(
+      splits.map(async (s) => {
+        const p = await storage.getPlacement(s.placementId);
+        return {
+          placementId: s.placementId,
+          employee: s.employee,
+          jobTitle: p?.jobTitle ?? "",
+          company: p?.company ?? "",
+          candidateName: p?.candidateName ?? "",
+          placedDate: p?.placedDate ?? "",
+          salary: p?.salary ?? 0,
+          feePercent: p?.feePercent ?? 0,
+          totalFee: p?.feeAmount ?? 0,
+          splitPercent: s.splitPercent,
+          commissionRate: s.commissionRate,
+          commissionAmount: s.commissionAmount,
+          invoiceStatus: p?.invoiceStatus ?? "",
+          paidDate: p?.paidDate ?? "",
+        };
+      })
+    );
+    res.json(rows);
+  });
+
+  // All commissions summary (for dashboard)
+  app.get("/api/commissions/summary", async (_req, res) => {
+    const all = await storage.getPlacements();
+    const employees = ["Andrew", "Ryan", "Aileen"];
+    const summary = await Promise.all(
+      employees.map(async (emp) => {
+        const splits = await storage.getSplitsForEmployee(emp);
+        const totalComm = splits.reduce((s, r) => s + r.commissionAmount, 0);
+        const placementIds = [...new Set(splits.map((s) => s.placementId))];
+        return { employee: emp, placements: placementIds.length, totalCommission: totalComm };
+      })
+    );
+    const totalRevenue = all.reduce((s, p) => s + p.feeAmount, 0);
+    const paidRevenue = all.filter((p) => p.invoiceStatus === "paid").reduce((s, p) => s + (p.paidAmount ?? 0), 0);
+    res.json({ totalRevenue, paidRevenue, placements: all.length, byEmployee: summary });
   });
 
   // ======================== LOXO INTEGRATION ========================
@@ -364,6 +474,51 @@ export async function registerRoutes(
       res.end();
     }
   });
+
+  // ======================== INVOICES ========================
+  app.get("/api/invoices", async (_req, res) => {
+    const data = await storage.getInvoices();
+    res.json(data);
+  });
+
+  app.get("/api/invoices/:id", async (req, res) => {
+    const inv = await storage.getInvoice(parseInt(req.params.id));
+    if (!inv) return res.status(404).json({ error: "Not found" });
+    res.json(inv);
+  });
+
+  app.post("/api/invoices", async (req, res) => {
+    const parsed = insertInvoiceSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error });
+    const inv = await storage.createInvoice(parsed.data);
+    res.status(201).json(inv);
+  });
+
+  app.patch("/api/invoices/:id", async (req, res) => {
+    const inv = await storage.updateInvoice(parseInt(req.params.id), req.body);
+    if (!inv) return res.status(404).json({ error: "Not found" });
+    res.json(inv);
+  });
+
+  app.delete("/api/invoices/:id", async (req, res) => {
+    await storage.deleteInvoice(parseInt(req.params.id));
+    res.json({ deleted: true });
+  });
+
+  // ======================== QUICKBOOKS ========================
+  registerQBRoutes(app);
+
+  // ======================== SOURCING ========================
+  registerSourcingRoutes(app);
+
+  // ======================== LINKEDIN PROFILE SYNC ========================
+  registerLinkedInSyncRoutes(app);
+
+  // ======================== OPEN API / SWAGGER ========================
+  registerOpenApi(app);
+
+  // Check if LinkedIn sync is overdue on startup
+  checkAndRunStartupSync();
 
   return httpServer;
 }
