@@ -16,10 +16,15 @@ import postgres from "postgres";
 import { eq, desc } from "drizzle-orm";
 
 if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL environment variable is required");
+  console.error("[storage] WARNING: DATABASE_URL not set — DB calls will fail");
 }
 
-const client = postgres(process.env.DATABASE_URL, { max: 10 });
+const client = postgres(process.env.DATABASE_URL || "postgresql://localhost/hirecommand", {
+  max: 10,
+  connect_timeout: 15,
+  idle_timeout: 30,
+  onnotice: () => {}, // suppress notices
+});
 export const db = drizzle(client);
 
 export interface IStorage {
@@ -396,4 +401,7 @@ async function seed() {
   }
 }
 
-seed().catch(console.error);
+// Only seed if DATABASE_URL is configured — never crash the server
+if (process.env.DATABASE_URL) {
+  seed().catch(err => console.error("[seed] Failed:", err.message));
+}

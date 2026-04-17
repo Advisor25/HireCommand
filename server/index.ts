@@ -60,6 +60,10 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  log(`NODE_ENV=${process.env.NODE_ENV}`);
+  log(`DATABASE_URL=${process.env.DATABASE_URL ? "SET (" + process.env.DATABASE_URL.split("@")[1] + ")" : "NOT SET"}`);
+  log(`PORT=${process.env.PORT || "5000 (default)"}`);
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
