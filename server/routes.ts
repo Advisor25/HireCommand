@@ -12,6 +12,11 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // ======================== HEALTH CHECK ========================
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
   // ======================== CANDIDATES ========================
   app.get("/api/candidates", async (_req, res) => {
     const data = await storage.getCandidates();
