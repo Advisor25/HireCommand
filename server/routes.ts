@@ -511,19 +511,19 @@ export async function registerRoutes(
   });
 
   // ======================== QUICKBOOKS ========================
-  registerQBRoutes(app);
+  try { registerQBRoutes(app); } catch(e: any) { console.error("[routes] QB routes failed:", e.message); }
 
   // ======================== SOURCING ========================
-  registerSourcingRoutes(app);
+  try { registerSourcingRoutes(app); } catch(e: any) { console.error("[routes] Sourcing routes failed:", e.message); }
 
   // ======================== LINKEDIN PROFILE SYNC ========================
-  registerLinkedInSyncRoutes(app);
+  try { registerLinkedInSyncRoutes(app); } catch(e: any) { console.error("[routes] LinkedIn routes failed:", e.message); }
 
   // ======================== OPEN API / SWAGGER ========================
-  registerOpenApi(app);
+  try { registerOpenApi(app); } catch(e: any) { console.error("[routes] OpenAPI/Swagger failed:", e.message); }
 
   // Check if LinkedIn sync is overdue on startup
-  checkAndRunStartupSync();
+  try { checkAndRunStartupSync(); } catch(e: any) { console.error("[routes] LinkedIn startup sync failed:", e.message); }
 
   return httpServer;
 }
