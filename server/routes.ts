@@ -510,6 +510,100 @@ export async function registerRoutes(
     res.json({ deleted: true });
   });
 
+  // ======================== JOBS CRUD ========================
+  app.post("/api/jobs", async (req, res) => {
+    try {
+      const data = { ...req.body, createdAt: new Date().toISOString() };
+      const job = await storage.createJob(data);
+      res.json(job);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/jobs/:id", async (req, res) => {
+    try {
+      const job = await storage.updateJob(Number(req.params.id), req.body);
+      if (!job) return res.status(404).json({ error: "Not found" });
+      res.json(job);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/jobs/:id", async (req, res) => {
+    try {
+      await storage.deleteJob(Number(req.params.id));
+      res.json({ deleted: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ======================== COMPANIES ========================
+  app.get("/api/companies", async (_req, res) => {
+    res.json(await storage.getCompanies());
+  });
+
+  app.get("/api/companies/:id", async (req, res) => {
+    const c = await storage.getCompany(Number(req.params.id));
+    if (!c) return res.status(404).json({ error: "Not found" });
+    res.json(c);
+  });
+
+  app.post("/api/companies", async (req, res) => {
+    try {
+      const data = { ...req.body, createdAt: new Date().toISOString() };
+      res.json(await storage.createCompany(data));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/companies/:id", async (req, res) => {
+    try {
+      const c = await storage.updateCompany(Number(req.params.id), req.body);
+      if (!c) return res.status(404).json({ error: "Not found" });
+      res.json(c);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/companies/:id", async (req, res) => {
+    try {
+      await storage.deleteCompany(Number(req.params.id));
+      res.json({ deleted: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ======================== CONTACTS ========================
+  app.get("/api/contacts", async (_req, res) => {
+    res.json(await storage.getContacts());
+  });
+
+  app.get("/api/contacts/company/:companyId", async (req, res) => {
+    res.json(await storage.getContactsByCompany(Number(req.params.companyId)));
+  });
+
+  app.get("/api/contacts/:id", async (req, res) => {
+    const c = await storage.getContact(Number(req.params.id));
+    if (!c) return res.status(404).json({ error: "Not found" });
+    res.json(c);
+  });
+
+  app.post("/api/contacts", async (req, res) => {
+    try {
+      const data = { ...req.body, createdAt: new Date().toISOString() };
+      res.json(await storage.createContact(data));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/contacts/:id", async (req, res) => {
+    try {
+      const c = await storage.updateContact(Number(req.params.id), req.body);
+      if (!c) return res.status(404).json({ error: "Not found" });
+      res.json(c);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/contacts/:id", async (req, res) => {
+    try {
+      await storage.deleteContact(Number(req.params.id));
+      res.json({ deleted: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // ======================== QUICKBOOKS ========================
   try { registerQBRoutes(app); } catch(e: any) { console.error("[routes] QB routes failed:", e.message); }
 

@@ -9,6 +9,8 @@ import {
   type Placement, type InsertPlacement, placements,
   type CommissionSplit, type InsertCommissionSplit, commissionSplits,
   type Invoice, type InsertInvoice, invoices,
+  type Company, type InsertCompany, companies,
+  type Contact, type InsertContact, contacts,
   settings,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -76,6 +78,23 @@ export interface IStorage {
   getSetting(key: string): Promise<string | undefined>;
   setSetting(key: string, value: string): Promise<void>;
   deleteSetting(key: string): Promise<void>;
+  // Companies
+  getCompanies(): Promise<Company[]>;
+  getCompany(id: number): Promise<Company | undefined>;
+  createCompany(c: InsertCompany): Promise<Company>;
+  updateCompany(id: number, c: Partial<InsertCompany>): Promise<Company | undefined>;
+  deleteCompany(id: number): Promise<void>;
+  // Contacts
+  getContacts(): Promise<Contact[]>;
+  getContactsByCompany(companyId: number): Promise<Contact[]>;
+  getContact(id: number): Promise<Contact | undefined>;
+  createContact(c: InsertContact): Promise<Contact>;
+  updateContact(id: number, c: Partial<InsertContact>): Promise<Contact | undefined>;
+  deleteContact(id: number): Promise<void>;
+  // Jobs CRUD
+  createJob(j: InsertJob): Promise<Job>;
+  updateJob(id: number, j: Partial<InsertJob>): Promise<Job | undefined>;
+  deleteJob(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -262,6 +281,62 @@ export class DatabaseStorage implements IStorage {
   }
   async deleteInvoice(id: number) {
     await db.delete(invoices).where(eq(invoices.id, id));
+  }
+
+  // ── Jobs CRUD (full) ──────────────────────────────────────────────────────
+  async createJob(j: InsertJob) {
+    const rows = await db.insert(jobs).values(j).returning();
+    return rows[0];
+  }
+  async updateJob(id: number, j: Partial<InsertJob>) {
+    const rows = await db.update(jobs).set(j).where(eq(jobs.id, id)).returning();
+    return rows[0];
+  }
+  async deleteJob(id: number) {
+    await db.delete(jobs).where(eq(jobs.id, id));
+  }
+
+  // ── Companies ─────────────────────────────────────────────────────────────
+  async getCompanies() {
+    return db.select().from(companies).orderBy(companies.name);
+  }
+  async getCompany(id: number) {
+    const rows = await db.select().from(companies).where(eq(companies.id, id));
+    return rows[0];
+  }
+  async createCompany(c: InsertCompany) {
+    const rows = await db.insert(companies).values(c).returning();
+    return rows[0];
+  }
+  async updateCompany(id: number, c: Partial<InsertCompany>) {
+    const rows = await db.update(companies).set(c).where(eq(companies.id, id)).returning();
+    return rows[0];
+  }
+  async deleteCompany(id: number) {
+    await db.delete(companies).where(eq(companies.id, id));
+  }
+
+  // ── Contacts ──────────────────────────────────────────────────────────────
+  async getContacts() {
+    return db.select().from(contacts).orderBy(contacts.lastName);
+  }
+  async getContactsByCompany(companyId: number) {
+    return db.select().from(contacts).where(eq(contacts.companyId, companyId));
+  }
+  async getContact(id: number) {
+    const rows = await db.select().from(contacts).where(eq(contacts.id, id));
+    return rows[0];
+  }
+  async createContact(c: InsertContact) {
+    const rows = await db.insert(contacts).values(c).returning();
+    return rows[0];
+  }
+  async updateContact(id: number, c: Partial<InsertContact>) {
+    const rows = await db.update(contacts).set(c).where(eq(contacts.id, id)).returning();
+    return rows[0];
+  }
+  async deleteContact(id: number) {
+    await db.delete(contacts).where(eq(contacts.id, id));
   }
 
   // ── Settings ──────────────────────────────────────────────────────────────
