@@ -4,15 +4,14 @@
  * Two ToS-compliant candidate import flows:
  *
  * 1. CV / Resume Upload  — PDF or DOCX → text extraction → OpenAI parse
- * 2. LinkedIn Import     — LinkedIn profile URL → ProxyCurl API → structured data
+ *    Falls back gracefully if OPENAI_API_KEY not set (returns blank form).
+ * 2. LinkedIn Import     — LinkedIn profile URL → ProxyCurl API
  *
- * Neither flow scrapes LinkedIn directly. ProxyCurl is a licensed
- * data provider that operates within LinkedIn's permitted use policy.
+ * Neither flow scrapes LinkedIn directly.
  */
 
 import { type Express, type Request, type Response } from "express";
 import multer from "multer";
-import OpenAI from "openai";
 import { storage } from "./storage";
 import type { InsertCandidate } from "@shared/schema";
 
@@ -21,39 +20,68 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const ok = [
+    const allowed = [
       "application/pdf",
       "application/msword",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ].includes(file.mimetype);
-    cb(null, ok);
+    ];
+    cb(null, allowed.includes(file.mimetype));
   },
 });
 
-// ─── OpenAI client (lazy — only if key present) ───────────────────────────────
-function getOpenAI() {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("OPENAI_API_KEY not configured");
-  return new OpenAI({ apiKey: key });
-}
-
-// ─── Extract text from PDF ────────────────────────────────────────────────────
+// ─── Extract text from PDF (pdf-parse v1 — function API) ─────────────────────
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  const pdfParse = (await import("pdf-parse")).default;
-  const result = await pdfParse(buffer);
-  return result.text;
+  try {
+    // pdf-parse v1 exports a single async function directly
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pdfParse: (buf: Buffer) => Promise<{ text: string }> = require("pdf-parse");
+    const result = await pdfParse(buffer);
+    return result.text || "";
+  } catch (err: any) {
+    console.error("[cv-import] PDF parse error:", err.message);
+    throw new Error(`Failed to read PDF: ${err.message}`);
+  }
 }
 
 // ─── Extract text from DOCX / DOC ────────────────────────────────────────────
 async function extractWordText(buffer: Buffer): Promise<string> {
-  const mammoth = await import("mammoth");
-  const result = await mammoth.extractRawText({ buffer });
-  return result.value;
+  try {
+    const mammoth = await import("mammoth");
+    const result = await mammoth.extractRawText({ buffer });
+    return result.value || "";
+  } catch (err: any) {
+    console.error("[cv-import] Word parse error:", err.message);
+    throw new Error(`Failed to read Word document: ${err.message}`);
+  }
 }
 
 // ─── Parse CV text → candidate fields via OpenAI ─────────────────────────────
 async function parseCvWithAI(text: string): Promise<Partial<InsertCandidate>> {
-  const openai = getOpenAI();
+  const key = process.env.OPENAI_API_KEY;
+
+  // ── Fallback: no OpenAI key → return blank form with raw text in notes ──
+  if (!key) {
+    console.warn("[cv-import] No OPENAI_API_KEY — returning blank form for manual fill");
+    return {
+      name: "",
+      title: "",
+      company: "",
+      location: "",
+      email: extractEmail(text),
+      phone: extractPhone(text),
+      linkedin: extractLinkedIn(text),
+      notes: text.slice(0, 1000).trim(),
+      tags: JSON.stringify([]),
+      matchScore: 75,
+      status: "sourced",
+      lastContact: new Date().toISOString().split("T")[0],
+      timeline: JSON.stringify([{ date: new Date().toISOString().split("T")[0], event: "Imported via CV upload" }]),
+    };
+  }
+
+  // ── OpenAI parse ──────────────────────────────────────────────────────────
+  const { default: OpenAI } = await import("openai");
+  const openai = new OpenAI({ apiKey: key });
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -72,7 +100,7 @@ async function parseCvWithAI(text: string): Promise<Partial<InsertCandidate>> {
   "phone": "phone number or empty string",
   "linkedin": "linkedin URL or empty string",
   "notes": "2-3 sentence professional summary highlighting key achievements and expertise",
-  "tags": ["tag1", "tag2", "tag3"]  // 3-5 relevant tags like industry, function, skills
+  "tags": ["tag1", "tag2", "tag3"]
 }
 Return ONLY the JSON object, no explanation.`,
       },
@@ -83,37 +111,48 @@ Return ONLY the JSON object, no explanation.`,
     ],
   });
 
-  const raw = completion.choices[0]?.message?.content || "{}";
-  const parsed = JSON.parse(raw);
+  let parsed: any = {};
+  try {
+    parsed = JSON.parse(completion.choices[0]?.message?.content || "{}");
+  } catch {
+    parsed = {};
+  }
 
   return {
-    name: parsed.name || "Unknown",
+    name: parsed.name || "",
     title: parsed.title || "",
     company: parsed.company || "",
     location: parsed.location || "",
-    email: parsed.email || "",
-    phone: parsed.phone || "",
-    linkedin: parsed.linkedin || "",
+    email: parsed.email || extractEmail(text),
+    phone: parsed.phone || extractPhone(text),
+    linkedin: parsed.linkedin || extractLinkedIn(text),
     notes: parsed.notes || "",
     tags: JSON.stringify(Array.isArray(parsed.tags) ? parsed.tags : []),
-    matchScore: 75, // default score for imported candidates
+    matchScore: 75,
     status: "sourced",
     lastContact: new Date().toISOString().split("T")[0],
-    timeline: JSON.stringify([
-      {
-        date: new Date().toISOString().split("T")[0],
-        event: "Imported via CV upload",
-      },
-    ]),
+    timeline: JSON.stringify([{ date: new Date().toISOString().split("T")[0], event: "Imported via CV upload" }]),
   };
 }
 
+// ─── Simple regex extractors (used as fallback) ───────────────────────────────
+function extractEmail(text: string): string {
+  const m = text.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+  return m ? m[0] : "";
+}
+function extractPhone(text: string): string {
+  const m = text.match(/(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/);
+  return m ? m[0] : "";
+}
+function extractLinkedIn(text: string): string {
+  const m = text.match(/linkedin\.com\/in\/[a-zA-Z0-9_-]+\/?/i);
+  return m ? `https://www.${m[0]}` : "";
+}
+
 // ─── Fetch LinkedIn profile via ProxyCurl ─────────────────────────────────────
-async function fetchLinkedInProfile(
-  linkedinUrl: string
-): Promise<Partial<InsertCandidate>> {
+async function fetchLinkedInProfile(linkedinUrl: string): Promise<Partial<InsertCandidate>> {
   const apiKey = process.env.PROXYCURL_API_KEY;
-  if (!apiKey) throw new Error("PROXYCURL_API_KEY not configured");
+  if (!apiKey) throw new Error("PROXYCURL_API_KEY not configured in Render environment variables");
 
   const encoded = encodeURIComponent(linkedinUrl);
   const resp = await fetch(
@@ -122,34 +161,27 @@ async function fetchLinkedInProfile(
   );
 
   if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`ProxyCurl error ${resp.status}: ${err}`);
+    const errText = await resp.text().catch(() => resp.statusText);
+    throw new Error(`ProxyCurl error ${resp.status}: ${errText}`);
   }
 
-  const p = await resp.json() as any;
+  const p = (await resp.json()) as any;
 
-  // Build tags from skills + industry
   const tags: string[] = [];
   if (p.industry) tags.push(p.industry);
   if (Array.isArray(p.skills)) tags.push(...p.skills.slice(0, 4));
 
-  // Most recent position
   const experience = Array.isArray(p.experiences) ? p.experiences : [];
   const current = experience[0];
 
-  // Build notes from summary + headline
-  const notes = [p.summary, p.headline]
-    .filter(Boolean)
-    .join(" — ")
-    .slice(0, 500) || `LinkedIn profile for ${p.full_name}`;
+  const notes = [p.summary, p.headline].filter(Boolean).join(" — ").slice(0, 500)
+    || `LinkedIn profile for ${p.full_name}`;
 
   return {
     name: p.full_name || "",
     title: current?.title || p.headline || "",
     company: current?.company || "",
-    location: [p.city, p.state, p.country_full_name]
-      .filter(Boolean)
-      .join(", "),
+    location: [p.city, p.state, p.country_full_name].filter(Boolean).join(", "),
     email: p.personal_emails?.[0] || "",
     phone: p.personal_numbers?.[0] || "",
     linkedin: linkedinUrl,
@@ -158,13 +190,7 @@ async function fetchLinkedInProfile(
     matchScore: 80,
     status: "sourced",
     lastContact: new Date().toISOString().split("T")[0],
-    timeline: JSON.stringify([
-      {
-        date: new Date().toISOString().split("T")[0],
-        event: "Imported via LinkedIn profile",
-      },
-    ]),
-    // Store full LinkedIn snapshot for future sync
+    timeline: JSON.stringify([{ date: new Date().toISOString().split("T")[0], event: "Imported via LinkedIn profile" }]),
     linkedinSnapshot: JSON.stringify({
       title: current?.title,
       company: current?.company,
@@ -180,7 +206,7 @@ async function fetchLinkedInProfile(
 export function registerCandidateImportRoutes(app: Express) {
   /**
    * POST /api/candidates/import/cv
-   * Upload a PDF or DOCX resume → AI-parsed candidate
+   * Upload PDF or DOCX → AI-parsed candidate preview
    */
   app.post(
     "/api/candidates/import/cv",
@@ -188,30 +214,36 @@ export function registerCandidateImportRoutes(app: Express) {
     async (req: Request, res: Response) => {
       try {
         if (!req.file) {
-          return res.status(400).json({ error: "No file uploaded" });
+          return res.status(400).json({ error: "No file uploaded. Please select a PDF or Word document." });
         }
 
-        const { mimetype, buffer } = req.file;
-        let text = "";
+        const { mimetype, buffer, originalname } = req.file;
+        console.log(`[cv-import] Received file: ${originalname}, type: ${mimetype}, size: ${buffer.length} bytes`);
 
+        let text = "";
         if (mimetype === "application/pdf") {
           text = await extractPdfText(buffer);
         } else {
           text = await extractWordText(buffer);
         }
 
+        console.log(`[cv-import] Extracted ${text.length} chars of text`);
+
         if (!text.trim()) {
-          return res.status(422).json({ error: "Could not extract text from file" });
+          return res.status(422).json({ error: "Could not extract text from the file. The document may be image-based or password protected. Try a different file." });
         }
 
-        // Parse with AI
         const fields = await parseCvWithAI(text);
+        console.log(`[cv-import] Parsed candidate: ${fields.name || "(blank)"}`);
 
-        // Return preview — don't save yet, let user confirm
-        return res.json({ preview: fields, rawText: text.slice(0, 500) });
+        return res.json({
+          preview: fields,
+          noAiKey: !process.env.OPENAI_API_KEY,
+          rawTextPreview: text.slice(0, 300),
+        });
       } catch (err: any) {
-        console.error("[cv-import]", err.message);
-        return res.status(500).json({ error: err.message });
+        console.error("[cv-import] Error:", err.message, err.stack);
+        return res.status(500).json({ error: err.message || "Upload failed. Please try again." });
       }
     }
   );
@@ -223,7 +255,7 @@ export function registerCandidateImportRoutes(app: Express) {
   app.post("/api/candidates/import/cv/confirm", async (req, res) => {
     try {
       const candidate = req.body as InsertCandidate;
-      if (!candidate.name) {
+      if (!candidate.name?.trim()) {
         return res.status(400).json({ error: "Name is required" });
       }
       const saved = await storage.createCandidate(candidate);
@@ -236,14 +268,13 @@ export function registerCandidateImportRoutes(app: Express) {
       return res.json(saved);
     } catch (err: any) {
       console.error("[cv-confirm]", err.message);
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({ error: err.message || "Failed to save candidate" });
     }
   });
 
   /**
    * POST /api/candidates/import/linkedin
    * Body: { url: "https://linkedin.com/in/..." }
-   * Fetches via ProxyCurl, returns preview
    */
   app.post("/api/candidates/import/linkedin", async (req, res) => {
     try {
@@ -251,23 +282,21 @@ export function registerCandidateImportRoutes(app: Express) {
       if (!url || !url.includes("linkedin.com/in/")) {
         return res.status(400).json({ error: "Valid LinkedIn profile URL required (linkedin.com/in/...)" });
       }
-
       const fields = await fetchLinkedInProfile(url);
       return res.json({ preview: fields });
     } catch (err: any) {
       console.error("[linkedin-import]", err.message);
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({ error: err.message || "LinkedIn import failed" });
     }
   });
 
   /**
    * POST /api/candidates/import/linkedin/confirm
-   * Save the previewed LinkedIn candidate
    */
   app.post("/api/candidates/import/linkedin/confirm", async (req, res) => {
     try {
       const candidate = req.body as InsertCandidate;
-      if (!candidate.name) {
+      if (!candidate.name?.trim()) {
         return res.status(400).json({ error: "Name is required" });
       }
       const saved = await storage.createCandidate(candidate);
@@ -280,7 +309,7 @@ export function registerCandidateImportRoutes(app: Express) {
       return res.json(saved);
     } catch (err: any) {
       console.error("[linkedin-confirm]", err.message);
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({ error: err.message || "Failed to save candidate" });
     }
   });
 }

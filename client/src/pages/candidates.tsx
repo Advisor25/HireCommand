@@ -233,6 +233,7 @@ function AddCandidateDialog() {
   const [cvDragOver, setCvDragOver] = useState(false);
   const [cvLoading, setCvLoading] = useState(false);
   const [cvPreview, setCvPreview] = useState<NewCandidateFormState | null>(null);
+  const [cvNoAiKey, setCvNoAiKey] = useState(false);
 
   // LinkedIn state
   const [liUrl, setLiUrl] = useState("");
@@ -253,6 +254,7 @@ function AddCandidateDialog() {
     setForm(EMPTY_FORM);
     setCvFile(null);
     setCvPreview(null);
+    setCvNoAiKey(false);
     setLiUrl("");
     setLiPreview(null);
     setTab("manual");
@@ -283,13 +285,23 @@ function AddCandidateDialog() {
     setCvFile(file);
     setCvLoading(true);
     setCvPreview(null);
+    setCvNoAiKey(false);
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch("/api/candidates/import/cv", { method: "POST", body: fd });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Upload failed");
-      const p = json.preview;
+      let res: Response;
+      let json: any;
+      try {
+        res = await fetch("/api/candidates/import/cv", { method: "POST", body: fd });
+        json = await res.json();
+      } catch (networkErr: any) {
+        throw new Error("Could not reach the server. Check your connection.");
+      }
+      if (!res.ok) {
+        throw new Error(json?.error || `Server error ${res.status} — check that OPENAI_API_KEY is set in Render env vars`);
+      }
+      if (json.noAiKey) setCvNoAiKey(true);
+      const p = json.preview || {};
       const tagsArr: string[] = (() => { try { return JSON.parse(p.tags || "[]"); } catch { return []; } })();
       setCvPreview({
         name: p.name || "",
@@ -305,7 +317,9 @@ function AddCandidateDialog() {
         notes: p.notes || "",
       });
     } catch (err: any) {
-      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+      const msg = typeof err?.message === "string" && err.message ? err.message : "Upload failed — please try again";
+      toast({ title: "Upload failed", description: msg, variant: "destructive" });
+      setCvFile(null);
     } finally {
       setCvLoading(false);
     }
@@ -493,18 +507,29 @@ function AddCandidateDialog() {
             {/* Preview + edit after parse */}
             {cvPreview && !cvLoading && (
               <form onSubmit={handleCvConfirm} className="space-y-4">
-                <div className="flex items-center gap-2 p-2 rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
-                  <CheckCircle size={14} className="text-green-600 shrink-0" />
-                  <p className="text-xs text-green-700 dark:text-green-400">
-                    CV parsed from <span className="font-medium">{cvFile?.name}</span> — review and confirm below.
-                  </p>
-                  <Button
-                    type="button" variant="ghost" size="sm" className="ml-auto h-6 px-2 text-xs"
-                    onClick={() => { setCvPreview(null); setCvFile(null); }}
-                  >
-                    Re-upload
-                  </Button>
-                </div>
+                {cvNoAiKey ? (
+                  <div className="flex items-start gap-2 p-2 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                    <AlertCircle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      <span className="font-semibold">AI parsing not available</span> — <code className="text-[11px]">OPENAI_API_KEY</code> is not set in your Render environment. Text was extracted from the file; please fill in the fields manually. Add the key in Render → Environment to enable auto-fill.
+                    </p>
+                    <Button type="button" variant="ghost" size="sm" className="ml-auto h-6 px-2 text-xs flex-shrink-0"
+                      onClick={() => { setCvPreview(null); setCvFile(null); setCvNoAiKey(false); }}>
+                      Re-upload
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 p-2 rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                    <CheckCircle size={14} className="text-green-600 shrink-0" />
+                    <p className="text-xs text-green-700 dark:text-green-400">
+                      CV parsed from <span className="font-medium">{cvFile?.name}</span> — review and confirm below.
+                    </p>
+                    <Button type="button" variant="ghost" size="sm" className="ml-auto h-6 px-2 text-xs"
+                      onClick={() => { setCvPreview(null); setCvFile(null); }}>
+                      Re-upload
+                    </Button>
+                  </div>
+                )}
                 <CandidateFormFields form={cvPreview} onChange={handleCvChange} />
                 <div className="flex justify-end gap-2 pt-1">
                   <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
