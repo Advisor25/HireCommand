@@ -359,8 +359,9 @@ export class DatabaseStorage implements IStorage {
 
 export const storage = new DatabaseStorage();
 
-// Seed data (runs only when DB is empty)
-async function seed() {
+// Seed function removed — data comes from Loxo sync
+/*
+async function _removedSeed() {
   const existingCandidates = await db.select().from(candidates);
   if (existingCandidates.length > 0) return;
 
@@ -476,7 +477,5 @@ async function seed() {
   }
 }
 
-// Only seed if DATABASE_URL is configured — never crash the server
-if (process.env.DATABASE_URL) {
-  seed().catch(err => console.error("[seed] Failed:", err.message));
-}
+*/
+// Seed removed — use Loxo sync to populate candidates and jobs

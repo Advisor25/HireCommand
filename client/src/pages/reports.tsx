@@ -104,44 +104,13 @@ interface RecruiterRow {
 }
 
 // ─── Initial data ─────────────────────────────────────────────────────────────
-const INIT_SEARCHES: SearchRow[] = [
-  { id: 1, client: "Meridian Capital", title: "Chief Financial Officer", health: "Stalled", daysOpen: 52, candidates: 3, owner: "A" },
-  { id: 2, client: "Summit Ventures", title: "Chief Technology Officer", health: "Stalled", daysOpen: 41, candidates: 5, owner: "R" },
-  { id: 3, client: "Harborview PE", title: "VP Operations", health: "Stalled", daysOpen: 38, candidates: 2, owner: "A" },
-  { id: 4, client: "CarePoint Health", title: "Chief Operating Officer", health: "At Risk", daysOpen: 29, candidates: 7, owner: "R" },
-  { id: 5, client: "TalentForge", title: "VP Sales", health: "At Risk", daysOpen: 22, candidates: 9, owner: "A" },
-  { id: 6, client: "Westfield Capital", title: "General Counsel", health: "At Risk", daysOpen: 18, candidates: 4, owner: "Ai" },
-  { id: 7, client: "DataPulse", title: "Chief Technology Officer", health: "Healthy", daysOpen: 14, candidates: 11, owner: "R" },
-  { id: 8, client: "Elevate Partners", title: "Chief Marketing Officer", health: "Healthy", daysOpen: 11, candidates: 8, owner: "A" },
-  { id: 9, client: "Riviera Health", title: "Chief Revenue Officer", health: "Healthy", daysOpen: 9, candidates: 6, owner: "Ai" },
-  { id: 10, client: "NorthStar Equity", title: "Head of Finance", health: "Healthy", daysOpen: 7, candidates: 5, owner: "R" },
-  { id: 11, client: "Polaris Group", title: "Chief People Officer", health: "Healthy", daysOpen: 5, candidates: 3, owner: "A" },
-];
+const INIT_SEARCHES: SearchRow[] = [];
 
-const INIT_ACTIONS: PriorityAction[] = [
-  { id: 1, urgency: "urgent", text: "Meridian CFO — 0 candidate movement in 12 days. Send status update to Warburg Pincus contact.", search: "Meridian Capital · CFO", done: false },
-  { id: 2, urgency: "urgent", text: "Summit CTO — Client hasn't responded to shortlist sent 9 days ago. Follow up today.", search: "Summit Ventures · CTO", done: false },
-  { id: 3, urgency: "action", text: "CarePoint COO — Interview feedback from client overdue 3 days.", search: "CarePoint Health · COO", done: false },
-  { id: 4, urgency: "action", text: "TalentForge VP Sales — Present 2 new candidates sourced this week.", search: "TalentForge · VP Sales", done: false },
-  { id: 5, urgency: "monitor", text: "DataPulse CTO — Sarah Chen 2nd round scheduled. Confirm prep call.", search: "DataPulse · CTO", done: false },
-];
+const INIT_ACTIONS: PriorityAction[] = [];
 
-const INIT_CLIENTS: ClientRow[] = [
-  { id: 1, client: "Meridian Capital", pe: "Warburg Pincus", searches: 2, submitted: 18, interviews: 9, status: "At Risk", lastActivity: "12 days ago" },
-  { id: 2, client: "Summit Ventures", pe: "Summit Partners", searches: 1, submitted: 12, interviews: 6, status: "At Risk", lastActivity: "9 days ago" },
-  { id: 3, client: "CarePoint Health", pe: "Blackstone", searches: 1, submitted: 15, interviews: 7, status: "Active", lastActivity: "3 days ago" },
-  { id: 4, client: "DataPulse", pe: "General Atlantic", searches: 1, submitted: 14, interviews: 8, status: "Active", lastActivity: "Today" },
-  { id: 5, client: "TalentForge", pe: "KKR", searches: 1, submitted: 11, interviews: 5, status: "Active", lastActivity: "2 days ago" },
-  { id: 6, client: "Elevate Partners", pe: "Bain Capital", searches: 1, submitted: 10, interviews: 4, status: "Active", lastActivity: "Yesterday" },
-  { id: 7, client: "Riviera Health", pe: "Apollo", searches: 2, submitted: 16, interviews: 8, status: "Active", lastActivity: "Today" },
-  { id: 8, client: "NorthStar Equity", pe: "TPG", searches: 2, submitted: 22, interviews: 11, status: "Active", lastActivity: "Yesterday" },
-];
+const INIT_CLIENTS: ClientRow[] = [];
 
-const INIT_RECRUITERS: RecruiterRow[] = [
-  { id: 1, name: "Andrew", searches: 5, submitted: 34, interviews: 18, placements: 2, avgDays: 35, fillRate: 72 },
-  { id: 2, name: "Ryan", searches: 4, submitted: 28, interviews: 14, placements: 1, avgDays: 41, fillRate: 58 },
-  { id: 3, name: "Aileen", searches: 2, submitted: 19, interviews: 8, placements: 0, avgDays: null, fillRate: null },
-];
+const INIT_RECRUITERS: RecruiterRow[] = [];
 
 // ─── Static chart data (unchanged) ───────────────────────────────────────────
 const conversionFunnel = [

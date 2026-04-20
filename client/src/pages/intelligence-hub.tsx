@@ -157,110 +157,7 @@ interface CompanyIntel {
   location: string;
 }
 
-const companies: CompanyIntel[] = [
-  {
-    id: "1", name: "Meridian Health Partners", sector: "Healthcare Services", peSponsor: "Warburg Pincus",
-    revenue: "$420M", headcount: 1240, headcountChange: 12,
-    leadershipGaps: ["CFO (Active Search)", "VP Supply Chain"],
-    recentHires: [
-      { name: "Sarah Chen", title: "CFO", from: "Optum Health", date: "2024-11" },
-      { name: "David Park", title: "VP Revenue Cycle", from: "HCA Healthcare", date: "2024-09" },
-    ],
-    recentDepartures: [
-      { name: "James Wilson", title: "CFO", to: "Summit Capital", date: "2024-10" },
-    ],
-    fundingStage: "PE Growth", lastFunding: "$180M Series D (2023)",
-    signals: ["hiring", "leadership_change"], momentum: "accelerating", location: "New York, NY",
-  },
-  {
-    id: "2", name: "DataPulse Analytics", sector: "Enterprise Software", peSponsor: "Insight Partners",
-    revenue: "$85M ARR", headcount: 340, headcountChange: 28,
-    leadershipGaps: ["VP Engineering", "CISO"],
-    recentHires: [
-      { name: "Alex Rivera", title: "CTO", from: "Google Cloud", date: "2024-08" },
-      { name: "Nina Patel", title: "VP Product", from: "Datadog", date: "2024-10" },
-    ],
-    recentDepartures: [
-      { name: "Mark Stevens", title: "VP Engineering", to: "Stripe", date: "2024-12" },
-    ],
-    fundingStage: "Series C", lastFunding: "$120M Series C (2024)",
-    signals: ["hiring", "growth", "funding"], momentum: "accelerating", location: "San Francisco, CA",
-  },
-  {
-    id: "3", name: "HealthBridge Solutions", sector: "Healthcare Operations", peSponsor: "Bain Capital",
-    revenue: "$210M", headcount: 680, headcountChange: -3,
-    leadershipGaps: ["COO (Confidential)", "Chief Digital Officer"],
-    recentHires: [
-      { name: "Marcus Williams", title: "COO", from: "McKinsey & Company", date: "2024-07" },
-    ],
-    recentDepartures: [
-      { name: "Lisa Morgan", title: "COO", to: "Optum", date: "2024-06" },
-      { name: "Robert Kim", title: "CDO", to: "Accenture", date: "2024-08" },
-    ],
-    fundingStage: "PE Buyout", lastFunding: "$340M LBO (2022)",
-    signals: ["leadership_change", "risk"], momentum: "stable", location: "Boston, MA",
-  },
-  {
-    id: "4", name: "NovaBrands Consumer", sector: "Consumer / DTC", peSponsor: "L Catterton",
-    revenue: "$180M", headcount: 420, headcountChange: 8,
-    leadershipGaps: ["CMO", "VP E-Commerce"],
-    recentHires: [
-      { name: "Jordan Blake", title: "CMO", from: "Glossier", date: "2024-06" },
-    ],
-    recentDepartures: [
-      { name: "Amy Richards", title: "CMO", to: "Warby Parker", date: "2024-05" },
-    ],
-    fundingStage: "PE Growth", lastFunding: "$95M Growth (2023)",
-    signals: ["hiring", "leadership_change"], momentum: "accelerating", location: "Los Angeles, CA",
-  },
-  {
-    id: "5", name: "Granite Peak Energy", sector: "Energy Infrastructure", peSponsor: "Warburg Pincus",
-    revenue: "$890M", headcount: 2100, headcountChange: 5,
-    leadershipGaps: ["VP Investor Relations"],
-    recentHires: [
-      { name: "Rachel Morrison", title: "CFO", from: "NextEra Energy", date: "2024-03" },
-    ],
-    recentDepartures: [],
-    fundingStage: "PE Infrastructure", lastFunding: "$1.2B Capital Raise (2023)",
-    signals: ["growth"], momentum: "stable", location: "Dallas, TX",
-  },
-  {
-    id: "6", name: "TalentForge HR Tech", sector: "HR Technology", peSponsor: "Vista Equity",
-    revenue: "$65M ARR", headcount: 280, headcountChange: 22,
-    leadershipGaps: ["VP Sales", "General Counsel"],
-    recentHires: [
-      { name: "Diana Foster", title: "CHRO", from: "Workday", date: "2024-04" },
-      { name: "Sam Torres", title: "VP Product", from: "Lattice", date: "2024-09" },
-    ],
-    recentDepartures: [],
-    fundingStage: "PE Growth", lastFunding: "$75M Growth (2024)",
-    signals: ["hiring", "growth", "funding"], momentum: "accelerating", location: "Chicago, IL",
-  },
-  {
-    id: "7", name: "Summit Capital Portfolio Co", sector: "Financial Services", peSponsor: "KKR",
-    revenue: "$320M", headcount: 560, headcountChange: -5,
-    leadershipGaps: ["CTO", "CFO (Succession)"],
-    recentHires: [
-      { name: "Jennifer Park", title: "CFO", from: "Emerson Electric", date: "2024-01" },
-    ],
-    recentDepartures: [
-      { name: "Tom Harris", title: "CTO", to: "Stripe", date: "2024-11" },
-    ],
-    fundingStage: "PE Buyout", lastFunding: "$500M LBO (2021)",
-    signals: ["leadership_change", "risk"], momentum: "decelerating", location: "Chicago, IL",
-  },
-  {
-    id: "8", name: "VitalWell Consumer Health", sector: "Consumer Health", peSponsor: "General Atlantic",
-    revenue: "$150M", headcount: 380, headcountChange: 15,
-    leadershipGaps: ["VP Marketing"],
-    recentHires: [
-      { name: "Karen Lee", title: "CEO", from: "J&J Consumer", date: "2024-02" },
-    ],
-    recentDepartures: [],
-    fundingStage: "PE Growth", lastFunding: "$200M Growth (2023)",
-    signals: ["growth", "hiring"], momentum: "accelerating", location: "New York, NY",
-  },
-];
+const companies: CompanyIntel[] = []; // removed
 
 // ─── Connection Map Data ──────────────────────────────────────
 
@@ -270,56 +167,7 @@ interface TeamMember {
   connections: { entity: string; type: "candidate" | "company" | "pe_firm" | "exec"; strength: "strong" | "warm" | "cold"; lastContact: string; notes: string }[];
 }
 
-const teamConnections: TeamMember[] = [
-  {
-    name: "Andrew",
-    role: "Managing Partner",
-    connections: [
-      { entity: "Sarah Chen", type: "candidate", strength: "strong", lastContact: "2 days ago", notes: "Multiple conversations, strong rapport" },
-      { entity: "Jennifer Park", type: "candidate", strength: "strong", lastContact: "1 week ago", notes: "Placed at Summit Capital" },
-      { entity: "Warburg Pincus", type: "pe_firm", strength: "strong", lastContact: "3 days ago", notes: "Direct LP relationship with 3 partners" },
-      { entity: "KKR", type: "pe_firm", strength: "warm", lastContact: "2 weeks ago", notes: "Introduced via Meridian deal" },
-      { entity: "Bain Capital", type: "pe_firm", strength: "warm", lastContact: "1 month ago", notes: "HealthBridge mandate source" },
-      { entity: "Marcus Williams", type: "candidate", strength: "warm", lastContact: "5 days ago", notes: "COO candidate, McKinsey background" },
-      { entity: "Meridian Health Partners", type: "company", strength: "strong", lastContact: "1 day ago", notes: "Active CFO search" },
-      { entity: "HealthBridge Solutions", type: "company", strength: "warm", lastContact: "1 week ago", notes: "COO mandate" },
-      { entity: "Katherine Novak", type: "candidate", strength: "strong", lastContact: "4 days ago", notes: "CEO candidate, KKR portfolio" },
-      { entity: "DataPulse Analytics", type: "company", strength: "warm", lastContact: "2 weeks ago", notes: "CTO search" },
-      { entity: "General Atlantic", type: "pe_firm", strength: "cold", lastContact: "2 months ago", notes: "Initial introduction" },
-      { entity: "Vista Equity", type: "pe_firm", strength: "warm", lastContact: "3 weeks ago", notes: "TalentForge relationship" },
-    ],
-  },
-  {
-    name: "Ryan",
-    role: "Partner, Executive Search",
-    connections: [
-      { entity: "Alex Rivera", type: "candidate", strength: "strong", lastContact: "3 days ago", notes: "CTO candidate, Google pedigree" },
-      { entity: "James Liu", type: "candidate", strength: "warm", lastContact: "1 week ago", notes: "CTO candidate, FinEdge" },
-      { entity: "Priya Nair", type: "candidate", strength: "warm", lastContact: "2 weeks ago", notes: "VP Eng candidate" },
-      { entity: "Insight Partners", type: "pe_firm", strength: "strong", lastContact: "4 days ago", notes: "DataPulse CTO mandate" },
-      { entity: "DataPulse Analytics", type: "company", strength: "strong", lastContact: "2 days ago", notes: "Active CTO search lead" },
-      { entity: "Summit Capital", type: "company", strength: "warm", lastContact: "1 week ago", notes: "CTO backfill need" },
-      { entity: "L Catterton", type: "pe_firm", strength: "warm", lastContact: "3 weeks ago", notes: "NovaBrands relationship" },
-      { entity: "Diana Foster", type: "candidate", strength: "strong", lastContact: "5 days ago", notes: "CHRO candidate, Workday" },
-      { entity: "TalentForge HR Tech", type: "company", strength: "warm", lastContact: "2 weeks ago", notes: "GC search" },
-    ],
-  },
-  {
-    name: "Aileen",
-    role: "Research & Intelligence Lead",
-    connections: [
-      { entity: "Patricia Huang", type: "candidate", strength: "strong", lastContact: "2 days ago", notes: "CFO candidate, 3 PE exits" },
-      { entity: "Rachel Morrison", type: "candidate", strength: "warm", lastContact: "1 week ago", notes: "CFO candidate, Granite Peak" },
-      { entity: "Jordan Blake", type: "candidate", strength: "warm", lastContact: "3 days ago", notes: "CMO candidate, DTC expert" },
-      { entity: "NovaBrands Consumer", type: "company", strength: "strong", lastContact: "3 days ago", notes: "CMO search research" },
-      { entity: "Granite Peak Energy", type: "company", strength: "warm", lastContact: "2 weeks ago", notes: "IR search mapping" },
-      { entity: "VitalWell Consumer Health", type: "company", strength: "warm", lastContact: "1 week ago", notes: "VP Marketing mapping" },
-      { entity: "Elena Vasquez", type: "candidate", strength: "warm", lastContact: "10 days ago", notes: "VP Ops candidate" },
-      { entity: "Derek Thompson", type: "candidate", strength: "cold", lastContact: "3 weeks ago", notes: "COO candidate, initial outreach" },
-      { entity: "General Atlantic", type: "pe_firm", strength: "warm", lastContact: "1 week ago", notes: "VitalWell mandate research" },
-    ],
-  },
-];
+const teamConnections: TeamMember[] = []; // removed
 
 // ─── Signal Feed Data ──────────────────────────────────────
 
@@ -335,18 +183,7 @@ interface Signal {
   suggestedAction?: string;
 }
 
-const signals: Signal[] = [
-  { id: "1", type: "leadership_move", headline: "CFO departure at Meridian Health Partners", detail: "James Wilson resigned as CFO to join Summit Capital. Active search initiated — Warburg Pincus mandating replacement within 60 days.", company: "Meridian Health Partners", timestamp: "2 hours ago", relevance: "high", actionable: true, suggestedAction: "Submit Sarah Chen and Patricia Huang as candidates" },
-  { id: "2", type: "funding", headline: "DataPulse closes $120M Series C", detail: "Led by Insight Partners with participation from Accel. Company now valued at $1.2B. Headcount expected to grow 40% over 12 months.", company: "DataPulse Analytics", timestamp: "6 hours ago", relevance: "high", actionable: true, suggestedAction: "Reach out about VP Engineering backfill and CISO need" },
-  { id: "3", type: "hiring_surge", headline: "TalentForge engineering headcount up 22% in 90 days", detail: "Vista Equity portfolio company adding aggressively across product and engineering. 14 new engineering roles posted this week.", company: "TalentForge HR Tech", timestamp: "1 day ago", relevance: "medium", actionable: true, suggestedAction: "Pitch VP Sales and General Counsel search services" },
-  { id: "4", type: "departure", headline: "Tom Harris (CTO) leaves Summit Capital Portfolio Co", detail: "Departing for Stripe after 3 years. KKR-backed company now has dual C-suite gaps (CTO + CFO succession). Critical talent risk.", company: "Summit Capital Portfolio Co", timestamp: "1 day ago", relevance: "high", actionable: true, suggestedAction: "Contact KKR operating team about CTO search mandate" },
-  { id: "5", type: "leadership_move", headline: "Marcus Williams joins HealthBridge as COO", detail: "Former McKinsey Engagement Manager tapped to replace Lisa Morgan. Expected to drive EBITDA improvement across 40 clinic locations.", company: "HealthBridge Solutions", timestamp: "2 days ago", relevance: "medium", actionable: false },
-  { id: "6", type: "acquisition", headline: "VitalWell exploring tuck-in acquisition", detail: "Sources indicate General Atlantic is backing VitalWell's acquisition of a $30M DTC supplement brand. Integration leadership needed.", company: "VitalWell Consumer Health", timestamp: "3 days ago", relevance: "medium", actionable: true, suggestedAction: "Offer integration leadership and VP Marketing search" },
-  { id: "7", type: "hiring_surge", headline: "NovaBrands doubling e-commerce team", detail: "L Catterton pushing digital transformation. New VP E-Commerce role created, along with Director of Digital Marketing and Head of Analytics.", company: "NovaBrands Consumer", timestamp: "3 days ago", relevance: "medium", actionable: true, suggestedAction: "Submit candidates for VP E-Commerce role" },
-  { id: "8", type: "ipo_signal", headline: "Granite Peak Energy considering IPO timeline", detail: "Warburg Pincus evaluating 2025 IPO. VP Investor Relations hire is priority to prepare S-1 and roadshow. Revenue at $890M positions well.", company: "Granite Peak Energy", timestamp: "5 days ago", relevance: "high", actionable: true, suggestedAction: "Pitch VP Investor Relations search — IPO-experienced candidates" },
-  { id: "9", type: "leadership_move", headline: "Jordan Blake named CMO at NovaBrands", detail: "Former Glossier VP Marketing tapped by L Catterton to lead digital brand strategy. Replaces Amy Richards who left for Warby Parker.", company: "NovaBrands Consumer", timestamp: "1 week ago", relevance: "low", actionable: false },
-  { id: "10", type: "funding", headline: "TalentForge raises $75M from Vista Equity", detail: "Growth round to fund product expansion and enterprise go-to-market. Valuation estimated at $400M. Hiring across all functions.", company: "TalentForge HR Tech", timestamp: "1 week ago", relevance: "medium", actionable: false },
-];
+const signals: Signal[] = []; // removed
 
 // ═══════════════════════════════════════════════════════════════
 // COMPONENT: Sankey Diagram (SVG-based Talent Flow)
