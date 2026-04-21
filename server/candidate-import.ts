@@ -79,46 +79,7 @@ async function parseCvWithAI(text: string): Promise<Partial<InsertCandidate>> {
   const tags     = extractTags(text);
   const notes    = buildNotes(text);
 
-  // If OpenAI key exists AND has credits, use it to improve the extraction
-  // But the regex result is already returned as the full response — OpenAI only upgrades it
-  const key = process.env.OPENAI_API_KEY;
-  if (key) {
-    try {
-      const { default: OpenAI } = await import("openai");
-      const openai = new OpenAI({ apiKey: key });
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        temperature: 0,
-        max_tokens: 400,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: `Extract candidate info from CV text. Return JSON with: name, title, company, location, notes (2 sentence summary). Only return fields you are confident about.`,
-          },
-          { role: "user", content: text.slice(0, 4000) },
-        ],
-      });
-      const ai = JSON.parse(completion.choices[0]?.message?.content || "{}");
-      return {
-        name:     ai.name     || name,
-        title:    ai.title    || title,
-        company:  ai.company  || company,
-        location: ai.location || location,
-        email, phone, linkedin,
-        notes:    ai.notes    || notes,
-        tags: JSON.stringify(tags),
-        matchScore: 75, status: "sourced",
-        lastContact: today,
-        timeline: JSON.stringify([{ date: today, event: "Imported via CV upload" }]),
-      };
-    } catch (err: any) {
-      // OpenAI failed (quota, network, etc.) — fall through to regex result below
-      console.warn("[cv-import] OpenAI unavailable, using regex extraction:", err.message);
-    }
-  }
-
-  // Pure regex result — no OpenAI needed
+  // Pure regex result — no OpenAI needed (AI upgrade removed to avoid quota errors)
   return {
     name, title, company, location, email, phone, linkedin, notes,
     tags: JSON.stringify(tags),
