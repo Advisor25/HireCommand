@@ -308,7 +308,7 @@ export async function registerRoutes(
     if (!apiKey) return res.status(400).json({ error: "No API key configured" });
     try {
       const r = await fetch(`${LOXO_BASE}/${slug}/people?per_page=1`, {
-        headers: { Authorization: `Token token=${apiKey}` },
+        headers: { Authorization: `Bearer ${apiKey}` },
       });
       if (!r.ok) return res.status(401).json({ error: "Invalid credentials" });
       const data: any = await r.json();
@@ -362,7 +362,7 @@ export async function registerRoutes(
           ? `${LOXO_BASE}/${slug}/people?per_page=${perPage}&scroll_id=${encodeURIComponent(scrollId)}`
           : `${LOXO_BASE}/${slug}/people?per_page=${perPage}`;
 
-        const r = await fetch(url, { headers: { Authorization: `Token token=${apiKey}` } });
+        const r = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
         if (!r.ok) { send({ error: `Loxo API error: ${r.status}` }); break; }
         const data: any = await r.json();
         const people: any[] = data.people || [];
@@ -425,7 +425,7 @@ export async function registerRoutes(
       while (hasMoreJobs && jobPage <= maxJobPages) {
         const r = await fetch(
           `${LOXO_BASE}/${slug}/jobs?per_page=25&page=${jobPage}`,
-          { headers: { Authorization: `Token token=${apiKey}` } }
+          { headers: { Authorization: `Bearer ${apiKey}` } }
         );
         if (!r.ok) { send({ error: `Loxo jobs API error: ${r.status}` }); break; }
         const data: any = await r.json();
