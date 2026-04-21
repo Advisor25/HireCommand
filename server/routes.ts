@@ -272,19 +272,39 @@ export async function registerRoutes(
   const LOXO_BASE = "https://app.loxo.co/api";
   const LOXO_SLUG = "the-hiring-advisors-1";
 
+  // In-memory cache for Loxo credentials — survives DB failures
+  // Seeded from env vars so Render env config works without DB
+  const loxoCache: Record<string, string> = {};
+  if (process.env.LOXO_API_KEY) loxoCache["loxo_api_key"] = process.env.LOXO_API_KEY;
+  if (process.env.LOXO_SLUG)    loxoCache["loxo_slug"]    = process.env.LOXO_SLUG;
+
+  async function getLoxoSetting(key: string): Promise<string | undefined> {
+    // Memory first (fastest, always works)
+    if (loxoCache[key]) return loxoCache[key];
+    // Fall back to DB
+    try { return await storage.getSetting(key); } catch { return undefined; }
+  }
+
+  async function setLoxoSetting(key: string, value: string): Promise<void> {
+    loxoCache[key] = value; // always update memory
+    try { await storage.setSetting(key, value); } catch (e) {
+      console.warn(`[loxo] DB write failed for ${key}, using memory cache only:`, e);
+    }
+  }
+
   // Save credentials
   app.post("/api/loxo/credentials", async (req, res) => {
     const { apiKey, slug } = req.body;
     if (!apiKey) return res.status(400).json({ error: "apiKey is required" });
-    await storage.setSetting("loxo_api_key", apiKey);
-    if (slug) await storage.setSetting("loxo_slug", slug);
+    await setLoxoSetting("loxo_api_key", apiKey);
+    if (slug) await setLoxoSetting("loxo_slug", slug);
     res.json({ ok: true });
   });
 
   // Test connection
   app.get("/api/loxo/test", async (_req, res) => {
-    const apiKey = await storage.getSetting("loxo_api_key");
-    const slug = await storage.getSetting("loxo_slug") || LOXO_SLUG;
+    const apiKey = await getLoxoSetting("loxo_api_key");
+    const slug = (await getLoxoSetting("loxo_slug")) || LOXO_SLUG;
     if (!apiKey) return res.status(400).json({ error: "No API key configured" });
     try {
       const r = await fetch(`${LOXO_BASE}/${slug}/people?per_page=1`, {
@@ -300,22 +320,22 @@ export async function registerRoutes(
 
   // Sync status
   app.get("/api/loxo/status", async (_req, res) => {
-    const lastSync = await storage.getSetting("loxo_last_sync");
-    const candidatesSynced = await storage.getSetting("loxo_candidates_synced");
-    const jobsSynced = await storage.getSetting("loxo_jobs_synced");
-    const syncRunning = await storage.getSetting("loxo_sync_running");
+    const lastSync = await getLoxoSetting("loxo_last_sync");
+    const candidatesSynced = await getLoxoSetting("loxo_candidates_synced");
+    const jobsSynced = await getLoxoSetting("loxo_jobs_synced");
+    const syncRunning = await getLoxoSetting("loxo_sync_running");
     res.json({
       lastSync: lastSync || null,
       candidatesSynced: candidatesSynced ? parseInt(candidatesSynced) : 0,
       jobsSynced: jobsSynced ? parseInt(jobsSynced) : 0,
-      isRunning: syncRunning === "true",
+      isRunning: syncRunning === "false",
     });
   });
 
   // Full sync — streams progress via SSE
   app.get("/api/loxo/sync", async (req, res) => {
-    const apiKey = await storage.getSetting("loxo_api_key");
-    const slug = await storage.getSetting("loxo_slug") || LOXO_SLUG;
+    const apiKey = await getLoxoSetting("loxo_api_key");
+    const slug = (await getLoxoSetting("loxo_slug")) || LOXO_SLUG;
     if (!apiKey) return res.status(400).json({ error: "No API key configured. Save credentials first." });
 
     // SSE headers so the client gets live progress
@@ -324,7 +344,7 @@ export async function registerRoutes(
     res.setHeader("Connection", "keep-alive");
     const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
-    await storage.setSetting("loxo_sync_running", "true");
+    await setLoxoSetting("loxo_sync_running", "true");
     let totalCandidates = 0;
     let totalJobs = 0;
 
@@ -393,7 +413,7 @@ export async function registerRoutes(
         if (!scrollId) break; // No more pages
       }
 
-      await storage.setSetting("loxo_candidates_synced", String(totalCandidates));
+      await setLoxoSetting("loxo_candidates_synced", String(totalCandidates));
       send({ phase: "people", message: `✓ ${totalCandidates} candidates synced`, progress: 50 });
 
       // --- Sync Jobs ---
@@ -462,12 +482,13 @@ export async function registerRoutes(
         jobPage++;
       }
 
-      await storage.setSetting("loxo_jobs_synced", String(totalJobs));
-      await storage.setSetting("loxo_last_sync", new Date().toISOString());
-      await storage.setSetting("loxo_sync_running", "false");
+      await setLoxoSetting("loxo_jobs_synced", String(totalJobs));
+      await setLoxoSetting("loxo_last_sync", new Date().toISOString());
+      await setLoxoSetting("loxo_sync_running", "false");
 
       send({
         phase: "complete",
+        done: true,
         message: `✓ Sync complete — ${totalCandidates} candidates, ${totalJobs} jobs imported`,
         progress: 100,
         candidatesSynced: totalCandidates,
@@ -475,7 +496,7 @@ export async function registerRoutes(
       });
       res.end();
     } catch (e: any) {
-      await storage.setSetting("loxo_sync_running", "false");
+      await setLoxoSetting("loxo_sync_running", "false");
       send({ error: e.message });
       res.end();
     }
