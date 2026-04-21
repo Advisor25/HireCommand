@@ -22,7 +22,7 @@ import {
 import {
   MapPin, Users, Clock, DollarSign, Briefcase, ChevronRight,
   Plus, Building2, User, Phone, Mail, Globe, Linkedin,
-  Pencil, Trash2, Star, Calendar, Target, X,
+  Pencil, Trash2, Star, Calendar, Target, X, Download, Loader2,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -676,8 +676,43 @@ export default function Jobs() {
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [addJobOpen, setAddJobOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [loxoSyncing, setLoxoSyncing] = useState(false);
+  const { toast } = useToast();
 
-  const { data: jobs = [] } = useQuery<Job[]>({ queryKey: ["/api/jobs"] });
+  const { data: jobs = [], refetch: refetchJobs } = useQuery<Job[]>({ queryKey: ["/api/jobs"] });
+
+  async function handleLoxoSync() {
+    setLoxoSyncing(true);
+    toast({ title: "Syncing from Loxo…", description: "This may take a minute." });
+    try {
+      const baseUrl = window.location.origin;
+      const es = new EventSource(`${baseUrl}/api/loxo/sync`);
+      await new Promise<void>((resolve, reject) => {
+        es.onmessage = (e) => {
+          try {
+            const msg = JSON.parse(e.data);
+            if (msg.done) {
+              toast({
+                title: "Loxo sync complete",
+                description: `${msg.candidatesSynced ?? 0} candidates · ${msg.jobsSynced ?? 0} jobs imported`,
+              });
+              refetchJobs();
+              resolve();
+            } else if (msg.error) {
+              toast({ title: "Sync error", description: msg.error, variant: "destructive" });
+              resolve();
+            }
+          } catch {}
+        };
+        es.onerror = () => { reject(new Error("Connection lost")); };
+      });
+      es.close();
+    } catch (err: any) {
+      toast({ title: "Sync failed", description: err.message, variant: "destructive" });
+    } finally {
+      setLoxoSyncing(false);
+    }
+  }
 
   const filtered = jobs.filter(j =>
     !search ||
@@ -694,9 +729,21 @@ export default function Jobs() {
             {jobs.length} active searches across your pipeline
           </p>
         </div>
-        <Button size="sm" onClick={() => setAddJobOpen(true)}>
-          <Plus size={14} className="mr-1.5" /> Add Job
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={handleLoxoSync}
+            disabled={loxoSyncing}
+          >
+            {loxoSyncing ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            {loxoSyncing ? "Syncing…" : "Sync from Loxo"}
+          </Button>
+          <Button size="sm" onClick={() => setAddJobOpen(true)}>
+            <Plus size={14} className="mr-1.5" /> Add Job
+          </Button>
+        </div>
       </div>
 
       {/* Search */}

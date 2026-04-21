@@ -51,6 +51,7 @@ import {
   Link2,
   CheckCircle,
   Loader2,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -623,10 +624,45 @@ export default function Candidates() {
   const [selected, setSelected] = useState<Candidate | null>(null);
   const [magicColumns, setMagicColumns] = useState(false);
   const [briefCandidate, setBriefCandidate] = useState<Candidate | null>(null);
+  const [loxoSyncing, setLoxoSyncing] = useState(false);
+  const { toast } = useToast();
 
-  const { data: candidates = [] } = useQuery<Candidate[]>({
+  const { data: candidates = [], refetch: refetchCandidates } = useQuery<Candidate[]>({
     queryKey: ["/api/candidates"],
   });
+
+  async function handleLoxoSync() {
+    setLoxoSyncing(true);
+    toast({ title: "Syncing from Loxo…", description: "This may take a minute." });
+    try {
+      const baseUrl = window.location.origin;
+      const es = new EventSource(`${baseUrl}/api/loxo/sync`);
+      await new Promise<void>((resolve, reject) => {
+        es.onmessage = (e) => {
+          try {
+            const msg = JSON.parse(e.data);
+            if (msg.done) {
+              toast({
+                title: "Loxo sync complete",
+                description: `${msg.candidatesSynced ?? 0} candidates · ${msg.jobsSynced ?? 0} jobs imported`,
+              });
+              refetchCandidates();
+              resolve();
+            } else if (msg.error) {
+              toast({ title: "Sync error", description: msg.error, variant: "destructive" });
+              resolve();
+            }
+          } catch {}
+        };
+        es.onerror = () => { reject(new Error("Connection lost")); };
+      });
+      es.close();
+    } catch (err: any) {
+      toast({ title: "Sync failed", description: err.message, variant: "destructive" });
+    } finally {
+      setLoxoSyncing(false);
+    }
+  }
 
   // Derive unique locations
   const uniqueLocations = Array.from(
@@ -688,6 +724,16 @@ export default function Candidates() {
           >
             <Sparkles size={14} />
             AI Search
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={handleLoxoSync}
+            disabled={loxoSyncing}
+          >
+            {loxoSyncing ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            {loxoSyncing ? "Syncing…" : "Sync from Loxo"}
           </Button>
           <AddCandidateDialog />
         </div>
