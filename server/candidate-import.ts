@@ -29,14 +29,23 @@ const upload = multer({
   },
 });
 
-// ─── Extract text from PDF (pdf-parse v1 — function API) ─────────────────────
+// ─── Extract text from PDF (pdfjs-dist — no test-file dependency) ─────────────
 async function extractPdfText(buffer: Buffer): Promise<string> {
   try {
-    // pdf-parse v1 exports a single async function directly
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const pdfParse: (buf: Buffer) => Promise<{ text: string }> = require("pdf-parse");
-    const result = await pdfParse(buffer);
-    return result.text || "";
+    const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+    const pdf = await loadingTask.promise;
+    const pages: string[] = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item: any) => item.str)
+        .join(" ");
+      pages.push(pageText);
+    }
+    return pages.join("\n");
   } catch (err: any) {
     console.error("[cv-import] PDF parse error:", err.message);
     throw new Error(`Failed to read PDF: ${err.message}`);

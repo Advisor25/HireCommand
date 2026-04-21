@@ -19,7 +19,7 @@ const allowlist = [
   "mammoth",
   "multer",
   "nanoid",
-  "pdf-parse",
+  // pdfjs-dist is intentionally kept external (native canvas dep)
   "nodemailer",
   "openai",
   "passport",
