@@ -55,87 +55,164 @@ async function extractWordText(buffer: Buffer): Promise<string> {
   }
 }
 
-// ─── Parse CV text → candidate fields via OpenAI ─────────────────────────────
+// ─── Parse CV text → candidate fields (regex-first, OpenAI optional) ──────────
 async function parseCvWithAI(text: string): Promise<Partial<InsertCandidate>> {
+  const today = new Date().toISOString().split("T")[0];
+
+  // Always extract structured fields with regex first — free, instant, reliable
+  const email    = extractEmail(text);
+  const phone    = extractPhone(text);
+  const linkedin = extractLinkedIn(text);
+  const name     = extractName(text);
+  const title    = extractTitle(text);
+  const company  = extractCompany(text);
+  const location = extractLocation(text);
+  const tags     = extractTags(text);
+  const notes    = buildNotes(text);
+
+  // If OpenAI key exists AND has credits, use it to improve the extraction
+  // But the regex result is already returned as the full response — OpenAI only upgrades it
   const key = process.env.OPENAI_API_KEY;
-
-  // ── Fallback: no OpenAI key → return blank form with raw text in notes ──
-  if (!key) {
-    console.warn("[cv-import] No OPENAI_API_KEY — returning blank form for manual fill");
-    return {
-      name: "",
-      title: "",
-      company: "",
-      location: "",
-      email: extractEmail(text),
-      phone: extractPhone(text),
-      linkedin: extractLinkedIn(text),
-      notes: text.slice(0, 1000).trim(),
-      tags: JSON.stringify([]),
-      matchScore: 75,
-      status: "sourced",
-      lastContact: new Date().toISOString().split("T")[0],
-      timeline: JSON.stringify([{ date: new Date().toISOString().split("T")[0], event: "Imported via CV upload" }]),
-    };
+  if (key) {
+    try {
+      const { default: OpenAI } = await import("openai");
+      const openai = new OpenAI({ apiKey: key });
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        temperature: 0,
+        max_tokens: 400,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: `Extract candidate info from CV text. Return JSON with: name, title, company, location, notes (2 sentence summary). Only return fields you are confident about.`,
+          },
+          { role: "user", content: text.slice(0, 4000) },
+        ],
+      });
+      const ai = JSON.parse(completion.choices[0]?.message?.content || "{}");
+      return {
+        name:     ai.name     || name,
+        title:    ai.title    || title,
+        company:  ai.company  || company,
+        location: ai.location || location,
+        email, phone, linkedin,
+        notes:    ai.notes    || notes,
+        tags: JSON.stringify(tags),
+        matchScore: 75, status: "sourced",
+        lastContact: today,
+        timeline: JSON.stringify([{ date: today, event: "Imported via CV upload" }]),
+      };
+    } catch (err: any) {
+      // OpenAI failed (quota, network, etc.) — fall through to regex result below
+      console.warn("[cv-import] OpenAI unavailable, using regex extraction:", err.message);
+    }
   }
 
-  // ── OpenAI parse ──────────────────────────────────────────────────────────
-  const { default: OpenAI } = await import("openai");
-  const openai = new OpenAI({ apiKey: key });
-
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature: 0,
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "system",
-        content: `You are a recruitment assistant. Extract candidate information from CV/resume text and return a JSON object with these exact fields:
-{
-  "name": "Full Name",
-  "title": "Current or most recent job title",
-  "company": "Current or most recent employer",
-  "location": "City, State/Country",
-  "email": "email address or empty string",
-  "phone": "phone number or empty string",
-  "linkedin": "linkedin URL or empty string",
-  "notes": "2-3 sentence professional summary highlighting key achievements and expertise",
-  "tags": ["tag1", "tag2", "tag3"]
-}
-Return ONLY the JSON object, no explanation.`,
-      },
-      {
-        role: "user",
-        content: `Extract candidate info from this CV:\n\n${text.slice(0, 8000)}`,
-      },
-    ],
-  });
-
-  let parsed: any = {};
-  try {
-    parsed = JSON.parse(completion.choices[0]?.message?.content || "{}");
-  } catch {
-    parsed = {};
-  }
-
+  // Pure regex result — no OpenAI needed
   return {
-    name: parsed.name || "",
-    title: parsed.title || "",
-    company: parsed.company || "",
-    location: parsed.location || "",
-    email: parsed.email || extractEmail(text),
-    phone: parsed.phone || extractPhone(text),
-    linkedin: parsed.linkedin || extractLinkedIn(text),
-    notes: parsed.notes || "",
-    tags: JSON.stringify(Array.isArray(parsed.tags) ? parsed.tags : []),
-    matchScore: 75,
-    status: "sourced",
-    lastContact: new Date().toISOString().split("T")[0],
-    timeline: JSON.stringify([{ date: new Date().toISOString().split("T")[0], event: "Imported via CV upload" }]),
+    name, title, company, location, email, phone, linkedin, notes,
+    tags: JSON.stringify(tags),
+    matchScore: 75, status: "sourced",
+    lastContact: today,
+    timeline: JSON.stringify([{ date: today, event: "Imported via CV upload" }]),
   };
 }
 
-// ─── Simple regex extractors (used as fallback) ───────────────────────────────
+// ─── Smart regex extractors ───────────────────────────────────────────────────
+
+function extractName(text: string): string {
+  // Name is usually the first non-empty line, all caps or title case, 2-4 words
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+  for (const line of lines.slice(0, 8)) {
+    // Skip lines that look like headers, addresses, or contact info
+    if (/^(resume|curriculum|cv|profile|summary|experience|education|skills|contact|address|email|phone|linkedin|http)/i.test(line)) continue;
+    if (/[@\d\/\\|]/.test(line)) continue;
+    const words = line.split(/\s+/);
+    if (words.length >= 2 && words.length <= 5) {
+      // Looks like a name — title case each word
+      return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+    }
+  }
+  return "";
+}
+
+// Common executive/C-suite titles to scan for
+const TITLE_PATTERNS = [
+  /\b(Chief\s+\w+\s+Officer|CEO|CFO|COO|CTO|CMO|CHRO|CRO|CPO)\b/i,
+  /\b(Vice\s+President|VP|SVP|EVP|AVP)\b[^\n]*/i,
+  /\b(President|Managing\s+(Director|Partner)|General\s+Manager)\b[^\n]*/i,
+  /\b(Director|Head)\s+of\b[^\n]*/i,
+  /\b(Senior|Lead|Principal)\s+\w+[^\n]*/i,
+  /\b(Controller|Comptroller|Treasurer|Partner|Associate|Manager|Analyst|Engineer|Consultant|Advisor)\b[^\n]*/i,
+];
+
+function extractTitle(text: string): string {
+  for (const pattern of TITLE_PATTERNS) {
+    const m = text.match(pattern);
+    if (m) return m[0].trim().replace(/\s+/g, " ").slice(0, 80);
+  }
+  // Fallback: look for a line after the name that looks like a title (short, no @)
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+  for (const line of lines.slice(1, 10)) {
+    if (line.length < 80 && !/@/.test(line) && /\b(at|of|for|and|&|–|-|\|)\b/i.test(line)) {
+      return line.slice(0, 80);
+    }
+  }
+  return "";
+}
+
+function extractCompany(text: string): string {
+  // Look for "at CompanyName" or lines after experience/work header
+  const atMatch = text.match(/\bat\s+([A-Z][A-Za-z0-9\s&.,'-]{2,40})/m);
+  if (atMatch) return atMatch[1].trim();
+
+  const expMatch = text.match(/(?:Experience|Employment|Work History)[^\n]*\n+([^\n]{3,60})/i);
+  if (expMatch) return expMatch[1].trim();
+
+  return "";
+}
+
+function extractLocation(text: string): string {
+  // US city, state pattern — e.g. "San Francisco, CA" or "New York, NY 10001"
+  const m = text.match(/([A-Z][a-zA-Z\s]+),\s*([A-Z]{2})(?:\s+\d{5})?/);
+  if (m) return `${m[1].trim()}, ${m[2]}`;
+
+  // International — "London, UK" / "Toronto, Canada"
+  const intl = text.match(/([A-Z][a-zA-Z\s]+),\s*(UK|Canada|Australia|Ireland|India|Singapore|UAE|Germany|France|Netherlands)/i);
+  if (intl) return `${intl[1].trim()}, ${intl[2]}`;
+
+  return "";
+}
+
+function extractTags(text: string): string[] {
+  const tags: string[] = [];
+  const skillKeywords = [
+    "Financial Analysis", "M&A", "Private Equity", "P&L", "GAAP", "IFRS",
+    "Revenue Growth", "SaaS", "Operations", "Strategy", "Business Development",
+    "Leadership", "Team Building", "Board", "Fundraising", "Budgeting",
+    "Forecasting", "ERP", "Salesforce", "Marketing", "Sales", "HR", "Legal",
+    "Technology", "Digital Transformation", "Supply Chain", "Procurement",
+    "Real Estate", "Healthcare", "Finance", "Accounting", "Engineering",
+  ];
+  for (const kw of skillKeywords) {
+    if (new RegExp(`\\b${kw}\\b`, "i").test(text)) tags.push(kw);
+    if (tags.length >= 6) break;
+  }
+  return tags;
+}
+
+function buildNotes(text: string): string {
+  // Pull the first substantive paragraph (likely a summary/objective)
+  const lines = text.split(/\n/).map(l => l.trim()).filter(l => l.length > 40);
+  for (const line of lines.slice(0, 20)) {
+    if (!/^(name|email|phone|address|linkedin|http|education|experience|skills|summary|objective)/i.test(line)) {
+      return line.slice(0, 500);
+    }
+  }
+  return "";
+}
+
 function extractEmail(text: string): string {
   const m = text.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
   return m ? m[0] : "";
@@ -238,7 +315,6 @@ export function registerCandidateImportRoutes(app: Express) {
 
         return res.json({
           preview: fields,
-          noAiKey: !process.env.OPENAI_API_KEY,
           rawTextPreview: text.slice(0, 300),
         });
       } catch (err: any) {
