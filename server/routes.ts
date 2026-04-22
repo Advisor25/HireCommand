@@ -61,16 +61,27 @@ export async function registerRoutes(
   });
 
   app.post("/api/jobs", async (req, res) => {
-    const parsed = insertJobSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-    const data = await storage.createJob(parsed.data);
-    res.status(201).json(data);
+    try {
+      const parsed = insertJobSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+      const data = await storage.createJob(parsed.data);
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   app.patch("/api/jobs/:id", async (req, res) => {
-    const data = await storage.updateJob(Number(req.params.id), req.body);
-    if (!data) return res.status(404).json({ error: "Not found" });
-    res.json(data);
+    try {
+      const data = await storage.updateJob(Number(req.params.id), req.body);
+      if (!data) return res.status(404).json({ error: "Not found" });
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/jobs/:id", async (req, res) => {
+    try {
+      await storage.deleteJob(Number(req.params.id));
+      res.json({ deleted: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   // ======================== OPPORTUNITIES ========================
@@ -273,13 +284,15 @@ export async function registerRoutes(
   const LOXO_SLUG = "the-hiring-advisors-1";
 
   // In-memory cache for Loxo credentials — survives DB failures
-  const HARDCODED_LOXO_KEY = "e2e54c99ad598dceef8c2bf344f6b6b82fe4d438b8918b74f1a7198a2ae06530a10b094bafc96bc4cf726657ed45131ee673a5bac33c259a484db82fef9a7d52684689b73e9fb5183e8f2068c381d9fab0aa5df8a6c69b85e1260a1f97380075b47f6fbab2ed79f00b046fe4cefa70fe80e179c7fd3c43ad9863b0bad4b14805";
-  const HARDCODED_LOXO_SLUG = "the-hiring-advisors-1";
   const loxoCache: Record<string, string> = {
-    "loxo_api_key": process.env.LOXO_API_KEY || HARDCODED_LOXO_KEY,
-    "loxo_slug":    process.env.LOXO_SLUG    || HARDCODED_LOXO_SLUG,
+    ...(process.env.LOXO_API_KEY ? { "loxo_api_key": process.env.LOXO_API_KEY } : {}),
+    ...(process.env.LOXO_SLUG    ? { "loxo_slug":    process.env.LOXO_SLUG }    : {}),
   };
-  console.log(`[loxo] key length at startup: ${loxoCache["loxo_api_key"]?.length} chars`);
+  if (loxoCache["loxo_api_key"]) {
+    console.log(`[loxo] API key loaded from environment (${loxoCache["loxo_api_key"].length} chars)`);
+  } else {
+    console.warn("[loxo] No LOXO_API_KEY in environment — credentials must be saved via /api/loxo/credentials");
+  }
 
   async function getLoxoSetting(key: string): Promise<string | undefined> {
     // Memory first (fastest, always works)
@@ -331,7 +344,7 @@ export async function registerRoutes(
       lastSync: lastSync || null,
       candidatesSynced: candidatesSynced ? parseInt(candidatesSynced) : 0,
       jobsSynced: jobsSynced ? parseInt(jobsSynced) : 0,
-      isRunning: syncRunning === "false",
+      isRunning: syncRunning === "true",
     });
   });
 
@@ -533,30 +546,6 @@ export async function registerRoutes(
   app.delete("/api/invoices/:id", async (req, res) => {
     await storage.deleteInvoice(parseInt(req.params.id));
     res.json({ deleted: true });
-  });
-
-  // ======================== JOBS CRUD ========================
-  app.post("/api/jobs", async (req, res) => {
-    try {
-      const data = { ...req.body, createdAt: new Date().toISOString() };
-      const job = await storage.createJob(data);
-      res.json(job);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  app.patch("/api/jobs/:id", async (req, res) => {
-    try {
-      const job = await storage.updateJob(Number(req.params.id), req.body);
-      if (!job) return res.status(404).json({ error: "Not found" });
-      res.json(job);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  app.delete("/api/jobs/:id", async (req, res) => {
-    try {
-      await storage.deleteJob(Number(req.params.id));
-      res.json({ deleted: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   // ======================== COMPANIES ========================

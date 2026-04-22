@@ -42,6 +42,7 @@ export interface IStorage {
   getJob(id: number): Promise<Job | undefined>;
   createJob(j: InsertJob): Promise<Job>;
   updateJob(id: number, j: Partial<InsertJob>): Promise<Job | undefined>;
+  deleteJob(id: number): Promise<void>;
   getOpportunities(): Promise<Opportunity[]>;
   getOpportunity(id: number): Promise<Opportunity | undefined>;
   getCampaigns(): Promise<Campaign[]>;
@@ -91,10 +92,6 @@ export interface IStorage {
   createContact(c: InsertContact): Promise<Contact>;
   updateContact(id: number, c: Partial<InsertContact>): Promise<Contact | undefined>;
   deleteContact(id: number): Promise<void>;
-  // Jobs CRUD
-  createJob(j: InsertJob): Promise<Job>;
-  updateJob(id: number, j: Partial<InsertJob>): Promise<Job | undefined>;
-  deleteJob(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {

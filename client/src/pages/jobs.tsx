@@ -68,7 +68,7 @@ function AddJobModal({ open, onClose }: { open: boolean; onClose: () => void }) 
   });
 
   const createCompanyMutation = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/companies", data),
+    mutationFn: (data: any) => apiRequest("POST", "/api/companies", data).then(r => r.json()),
     onSuccess: (co: Company) => {
       qc.invalidateQueries({ queryKey: ["/api/companies"] });
       setForm(f => ({ ...f, company: co.name, companyId: String(co.id) }));
@@ -78,7 +78,7 @@ function AddJobModal({ open, onClose }: { open: boolean; onClose: () => void }) 
   });
 
   const createContactMutation = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/contacts", data),
+    mutationFn: (data: any) => apiRequest("POST", "/api/contacts", data).then(r => r.json()),
     onSuccess: (ct: Contact) => {
       qc.invalidateQueries({ queryKey: ["/api/contacts"] });
       setForm(f => ({ ...f, hiringManagerId: String(ct.id) }));
