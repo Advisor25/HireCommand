@@ -6,6 +6,7 @@ import { registerOpenApi } from "./openapi";
 import { registerSourcingRoutes } from "./sourcing";
 import { registerQBRoutes } from "./quickbooks";
 import { registerLinkedInSyncRoutes, checkAndRunStartupSync } from "./linkedin-sync";
+import { registerCandidateImportRoutes } from "./candidate-import";
 import { insertInvoiceSchema } from "@shared/schema";
 
 export async function registerRoutes(
@@ -60,16 +61,27 @@ export async function registerRoutes(
   });
 
   app.post("/api/jobs", async (req, res) => {
-    const parsed = insertJobSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-    const data = await storage.createJob(parsed.data);
-    res.status(201).json(data);
+    try {
+      const parsed = insertJobSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+      const data = await storage.createJob(parsed.data);
+      res.status(201).json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   app.patch("/api/jobs/:id", async (req, res) => {
-    const data = await storage.updateJob(Number(req.params.id), req.body);
-    if (!data) return res.status(404).json({ error: "Not found" });
-    res.json(data);
+    try {
+      const data = await storage.updateJob(Number(req.params.id), req.body);
+      if (!data) return res.status(404).json({ error: "Not found" });
+      res.json(data);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/jobs/:id", async (req, res) => {
+    try {
+      await storage.deleteJob(Number(req.params.id));
+      res.json({ deleted: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
   // ======================== OPPORTUNITIES ========================
@@ -271,19 +283,44 @@ export async function registerRoutes(
   const LOXO_BASE = "https://app.loxo.co/api";
   const LOXO_SLUG = "the-hiring-advisors-1";
 
+  // In-memory cache for Loxo credentials — survives DB failures
+  const loxoCache: Record<string, string> = {
+    ...(process.env.LOXO_API_KEY ? { "loxo_api_key": process.env.LOXO_API_KEY } : {}),
+    ...(process.env.LOXO_SLUG    ? { "loxo_slug":    process.env.LOXO_SLUG }    : {}),
+  };
+  if (loxoCache["loxo_api_key"]) {
+    console.log(`[loxo] API key loaded from environment (${loxoCache["loxo_api_key"].length} chars)`);
+  } else {
+    console.warn("[loxo] No LOXO_API_KEY in environment — credentials must be saved via /api/loxo/credentials");
+  }
+
+  async function getLoxoSetting(key: string): Promise<string | undefined> {
+    // Memory first (fastest, always works)
+    if (loxoCache[key]) return loxoCache[key];
+    // Fall back to DB
+    try { return await storage.getSetting(key); } catch { return undefined; }
+  }
+
+  async function setLoxoSetting(key: string, value: string): Promise<void> {
+    loxoCache[key] = value; // always update memory
+    try { await storage.setSetting(key, value); } catch (e) {
+      console.warn(`[loxo] DB write failed for ${key}, using memory cache only:`, e);
+    }
+  }
+
   // Save credentials
   app.post("/api/loxo/credentials", async (req, res) => {
     const { apiKey, slug } = req.body;
     if (!apiKey) return res.status(400).json({ error: "apiKey is required" });
-    await storage.setSetting("loxo_api_key", apiKey);
-    if (slug) await storage.setSetting("loxo_slug", slug);
+    await setLoxoSetting("loxo_api_key", apiKey);
+    if (slug) await setLoxoSetting("loxo_slug", slug);
     res.json({ ok: true });
   });
 
   // Test connection
   app.get("/api/loxo/test", async (_req, res) => {
-    const apiKey = await storage.getSetting("loxo_api_key");
-    const slug = await storage.getSetting("loxo_slug") || LOXO_SLUG;
+    const apiKey = await getLoxoSetting("loxo_api_key");
+    const slug = (await getLoxoSetting("loxo_slug")) || LOXO_SLUG;
     if (!apiKey) return res.status(400).json({ error: "No API key configured" });
     try {
       const r = await fetch(`${LOXO_BASE}/${slug}/people?per_page=1`, {
@@ -299,10 +336,10 @@ export async function registerRoutes(
 
   // Sync status
   app.get("/api/loxo/status", async (_req, res) => {
-    const lastSync = await storage.getSetting("loxo_last_sync");
-    const candidatesSynced = await storage.getSetting("loxo_candidates_synced");
-    const jobsSynced = await storage.getSetting("loxo_jobs_synced");
-    const syncRunning = await storage.getSetting("loxo_sync_running");
+    const lastSync = await getLoxoSetting("loxo_last_sync");
+    const candidatesSynced = await getLoxoSetting("loxo_candidates_synced");
+    const jobsSynced = await getLoxoSetting("loxo_jobs_synced");
+    const syncRunning = await getLoxoSetting("loxo_sync_running");
     res.json({
       lastSync: lastSync || null,
       candidatesSynced: candidatesSynced ? parseInt(candidatesSynced) : 0,
@@ -313,8 +350,8 @@ export async function registerRoutes(
 
   // Full sync — streams progress via SSE
   app.get("/api/loxo/sync", async (req, res) => {
-    const apiKey = await storage.getSetting("loxo_api_key");
-    const slug = await storage.getSetting("loxo_slug") || LOXO_SLUG;
+    const apiKey = await getLoxoSetting("loxo_api_key");
+    const slug = (await getLoxoSetting("loxo_slug")) || LOXO_SLUG;
     if (!apiKey) return res.status(400).json({ error: "No API key configured. Save credentials first." });
 
     // SSE headers so the client gets live progress
@@ -323,7 +360,7 @@ export async function registerRoutes(
     res.setHeader("Connection", "keep-alive");
     const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
-    await storage.setSetting("loxo_sync_running", "true");
+    await setLoxoSetting("loxo_sync_running", "true");
     let totalCandidates = 0;
     let totalJobs = 0;
 
@@ -392,7 +429,7 @@ export async function registerRoutes(
         if (!scrollId) break; // No more pages
       }
 
-      await storage.setSetting("loxo_candidates_synced", String(totalCandidates));
+      await setLoxoSetting("loxo_candidates_synced", String(totalCandidates));
       send({ phase: "people", message: `✓ ${totalCandidates} candidates synced`, progress: 50 });
 
       // --- Sync Jobs ---
@@ -461,12 +498,13 @@ export async function registerRoutes(
         jobPage++;
       }
 
-      await storage.setSetting("loxo_jobs_synced", String(totalJobs));
-      await storage.setSetting("loxo_last_sync", new Date().toISOString());
-      await storage.setSetting("loxo_sync_running", "false");
+      await setLoxoSetting("loxo_jobs_synced", String(totalJobs));
+      await setLoxoSetting("loxo_last_sync", new Date().toISOString());
+      await setLoxoSetting("loxo_sync_running", "false");
 
       send({
         phase: "complete",
+        done: true,
         message: `✓ Sync complete — ${totalCandidates} candidates, ${totalJobs} jobs imported`,
         progress: 100,
         candidatesSynced: totalCandidates,
@@ -474,7 +512,7 @@ export async function registerRoutes(
       });
       res.end();
     } catch (e: any) {
-      await storage.setSetting("loxo_sync_running", "false");
+      await setLoxoSetting("loxo_sync_running", "false");
       send({ error: e.message });
       res.end();
     }
@@ -510,20 +548,93 @@ export async function registerRoutes(
     res.json({ deleted: true });
   });
 
+  // ======================== COMPANIES ========================
+  app.get("/api/companies", async (_req, res) => {
+    res.json(await storage.getCompanies());
+  });
+
+  app.get("/api/companies/:id", async (req, res) => {
+    const c = await storage.getCompany(Number(req.params.id));
+    if (!c) return res.status(404).json({ error: "Not found" });
+    res.json(c);
+  });
+
+  app.post("/api/companies", async (req, res) => {
+    try {
+      const data = { ...req.body, createdAt: new Date().toISOString() };
+      res.json(await storage.createCompany(data));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/companies/:id", async (req, res) => {
+    try {
+      const c = await storage.updateCompany(Number(req.params.id), req.body);
+      if (!c) return res.status(404).json({ error: "Not found" });
+      res.json(c);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/companies/:id", async (req, res) => {
+    try {
+      await storage.deleteCompany(Number(req.params.id));
+      res.json({ deleted: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ======================== CONTACTS ========================
+  app.get("/api/contacts", async (_req, res) => {
+    res.json(await storage.getContacts());
+  });
+
+  app.get("/api/contacts/company/:companyId", async (req, res) => {
+    res.json(await storage.getContactsByCompany(Number(req.params.companyId)));
+  });
+
+  app.get("/api/contacts/:id", async (req, res) => {
+    const c = await storage.getContact(Number(req.params.id));
+    if (!c) return res.status(404).json({ error: "Not found" });
+    res.json(c);
+  });
+
+  app.post("/api/contacts", async (req, res) => {
+    try {
+      const data = { ...req.body, createdAt: new Date().toISOString() };
+      res.json(await storage.createContact(data));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch("/api/contacts/:id", async (req, res) => {
+    try {
+      const c = await storage.updateContact(Number(req.params.id), req.body);
+      if (!c) return res.status(404).json({ error: "Not found" });
+      res.json(c);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete("/api/contacts/:id", async (req, res) => {
+    try {
+      await storage.deleteContact(Number(req.params.id));
+      res.json({ deleted: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ======================== CANDIDATE IMPORT (CV + LinkedIn) ========================
+  try { registerCandidateImportRoutes(app); } catch(e: any) { console.error("[routes] Candidate import routes failed:", e.message); }
+
   // ======================== QUICKBOOKS ========================
-  registerQBRoutes(app);
+  try { registerQBRoutes(app); } catch(e: any) { console.error("[routes] QB routes failed:", e.message); }
 
   // ======================== SOURCING ========================
-  registerSourcingRoutes(app);
+  try { registerSourcingRoutes(app); } catch(e: any) { console.error("[routes] Sourcing routes failed:", e.message); }
 
   // ======================== LINKEDIN PROFILE SYNC ========================
-  registerLinkedInSyncRoutes(app);
+  try { registerLinkedInSyncRoutes(app); } catch(e: any) { console.error("[routes] LinkedIn routes failed:", e.message); }
 
   // ======================== OPEN API / SWAGGER ========================
-  registerOpenApi(app);
+  try { registerOpenApi(app); } catch(e: any) { console.error("[routes] OpenAPI/Swagger failed:", e.message); }
 
   // Check if LinkedIn sync is overdue on startup
-  checkAndRunStartupSync();
+  try { checkAndRunStartupSync(); } catch(e: any) { console.error("[routes] LinkedIn startup sync failed:", e.message); }
 
   return httpServer;
 }
