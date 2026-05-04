@@ -79,6 +79,15 @@ export interface IStorage {
   getSetting(key: string): Promise<string | undefined>;
   setSetting(key: string, value: string): Promise<void>;
   deleteSetting(key: string): Promise<void>;
+  // Users
+  getUsers(): Promise<User[]>;
+  // Email Journal
+  createEmailJournalEntry(entry: InsertEmailJournal): Promise<EmailJournal>;
+  getEmailJournalForCandidate(candidateId: number): Promise<EmailJournal[]>;
+  getEmailJournalForContact(contactId: number): Promise<EmailJournal[]>;
+  getUnmatchedEmails(): Promise<EmailJournal[]>;
+  getEmailJournalGmailIds(): Promise<Set<string>>;
+  matchEmailJournalEntry(id: number, match: { candidateId?: number; contactId?: number }): Promise<EmailJournal>;
   // Companies
   getCompanies(): Promise<Company[]>;
   getCompany(id: number): Promise<Company | undefined>;
@@ -279,16 +288,6 @@ export class DatabaseStorage implements IStorage {
   async deleteInvoice(id: number) {
     await db.delete(invoices).where(eq(invoices.id, id));
   }
-
-  // ── Jobs CRUD (full) ──────────────────────────────────────────────────────
-  async createJob(j: InsertJob) {
-    const rows = await db.insert(jobs).values(j).returning();
-    return rows[0];
-  }
-  async updateJob(id: number, j: Partial<InsertJob>) {
-    const rows = await db.update(jobs).set(j).where(eq(jobs.id, id)).returning();
-    return rows[0];
-  }
   async deleteJob(id: number) {
     await db.delete(jobs).where(eq(jobs.id, id));
   }
@@ -476,3 +475,65 @@ async function _removedSeed() {
 
 */
 // Seed removed — use Loxo sync to populate candidates and jobs
+
+// ─── Email Journal implementations (appended to DrizzleStorage) ───────────────
+// These are added as a mixin pattern — register on the prototype after class def.
+// In a future refactor, move these inside the class body.
+
+import { emailJournal, type InsertEmailJournal, type EmailJournal } from "../shared/schema";
+import { eq, isNull } from "drizzle-orm";
+
+// Patch DrizzleStorage prototype with email journal methods
+const proto = DrizzleStorage.prototype as any;
+
+proto.getUsers = async function() {
+  return await db.select().from(users);
+};
+
+proto.createEmailJournalEntry = async function(entry: InsertEmailJournal): Promise<EmailJournal> {
+  const now = new Date().toISOString();
+  const rows = await db.insert(emailJournal)
+    .values({ ...entry, createdAt: now })
+    .onConflictDoNothing()  // gmailId is unique — skip duplicates
+    .returning();
+  return rows[0];
+};
+
+proto.getEmailJournalForCandidate = async function(candidateId: number): Promise<EmailJournal[]> {
+  return await db.select().from(emailJournal)
+    .where(eq(emailJournal.candidateId, candidateId))
+    .orderBy(emailJournal.sentAt);
+};
+
+proto.getEmailJournalForContact = async function(contactId: number): Promise<EmailJournal[]> {
+  return await db.select().from(emailJournal)
+    .where(eq(emailJournal.contactId, contactId))
+    .orderBy(emailJournal.sentAt);
+};
+
+proto.getUnmatchedEmails = async function(): Promise<EmailJournal[]> {
+  return await db.select().from(emailJournal)
+    .where(eq(emailJournal.matched, "false"))
+    .orderBy(emailJournal.sentAt);
+};
+
+proto.getEmailJournalGmailIds = async function(): Promise<Set<string>> {
+  const rows = await db.select({ gmailId: emailJournal.gmailId }).from(emailJournal);
+  return new Set(rows.map(r => r.gmailId));
+};
+
+proto.matchEmailJournalEntry = async function(
+  id: number,
+  match: { candidateId?: number; contactId?: number }
+): Promise<EmailJournal> {
+  const rows = await db.update(emailJournal)
+    .set({
+      candidateId:   match.candidateId   ?? null,
+      contactId:     match.contactId     ?? null,
+      matched:       "true",
+    })
+    .where(eq(emailJournal.id, id))
+    .returning();
+  return rows[0];
+};
+

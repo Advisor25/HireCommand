@@ -153,25 +153,39 @@ export async function registerRoutes(
 
   // ======================== STATS ========================
   app.get("/api/stats", async (_req, res) => {
-    const allJobs = await storage.getJobs();
-    const allCandidates = await storage.getCandidates();
-    
-    res.json({
-      activeJobs: allJobs.length,
-      pipelineCandidates: allCandidates.length * 53,
-      interviewsThisWeek: 8,
-      placementsMTD: 3,
-      revenueMTD: "$127K",
-      avgTimeToFill: 34,
-      pipeline: {
-        sourced: allCandidates.filter(c => c.status === "sourced").length * 15,
-        contacted: allCandidates.filter(c => c.status === "contacted").length * 12,
-        screening: allCandidates.filter(c => c.status === "screening").length * 10,
-        interview: allCandidates.filter(c => c.status === "interview").length * 5,
-        offer: allCandidates.filter(c => c.status === "offer").length * 3,
-        placed: 3,
-      },
-    });
+    try {
+      const allJobs = await storage.getJobs();
+      const allCandidates = await storage.getCandidates();
+      const allPlacements = await storage.getPlacements();
+      const allInterviews = await storage.getInterviews();
+
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+      const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay())).toISOString().slice(0, 10);
+
+      const placementsMTD = allPlacements.filter(p => p.placementDate >= startOfMonth);
+      const revenueMTD = placementsMTD.reduce((sum, p) => sum + (p.feeAmount || 0), 0);
+      const interviewsThisWeek = allInterviews.filter(i => i.interviewDate >= startOfWeek).length;
+
+      res.json({
+        activeJobs: allJobs.filter(j => j.stage !== "placed").length,
+        pipelineCandidates: allCandidates.length,
+        interviewsThisWeek,
+        placementsMTD: placementsMTD.length,
+        revenueMTD: `$${Math.round(revenueMTD / 1000)}K`,
+        avgTimeToFill: 34,
+        pipeline: {
+          sourced:    allCandidates.filter(c => c.status === "sourced").length,
+          contacted:  allCandidates.filter(c => c.status === "contacted").length,
+          screening:  allCandidates.filter(c => c.status === "screening").length,
+          interview:  allCandidates.filter(c => c.status === "interview").length,
+          offer:      allCandidates.filter(c => c.status === "offer").length,
+          placed:     allCandidates.filter(c => c.status === "placed").length,
+        },
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // ======================== PLACEMENTS & REVENUE ========================
