@@ -25,6 +25,8 @@ import Revenue from "@/pages/revenue";
 import Source from "@/pages/source";
 import Invoices from "@/pages/invoices";
 
+import EmailJournal from "@/pages/email-journal";
+
 function AppRouter() {
   return (
     <Switch>
@@ -42,6 +44,7 @@ function AppRouter() {
       <Route path="/clients" component={ClientPortal} />
       <Route path="/revenue" component={Revenue} />
       <Route path="/invoices" component={Invoices} />
+      <Route path="/email" component={EmailJournal} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
     </Switch>
