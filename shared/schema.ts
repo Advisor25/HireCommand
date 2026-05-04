@@ -2,6 +2,39 @@ import { pgTable, text, integer, real, serial, doublePrecision } from "drizzle-o
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// ─── Companies ────────────────────────────────────────────────────────────────
+export const companies = pgTable("companies", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  website: text("website").default(""),
+  industry: text("industry").default(""),
+  size: text("size").default(""),           // e.g. "50-250 employees"
+  type: text("type").default(""),           // PE-backed, Public, Private, Non-profit
+  peFirm: text("pe_firm").default(""),      // PE sponsor if applicable
+  hqLocation: text("hq_location").default(""),
+  description: text("description").default(""),
+  notes: text("notes").default(""),
+  linkedinUrl: text("linkedin_url").default(""),
+  createdAt: text("created_at").notNull(),
+});
+
+// ─── Contacts (hiring managers, sponsors, etc.) ───────────────────────────────
+export const contacts = pgTable("contacts", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),         // FK → companies.id (optional)
+  companyName: text("company_name").default(""), // denormalised for quick display
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  title: text("title").default(""),
+  email: text("email").default(""),
+  phone: text("phone").default(""),
+  mobile: text("mobile").default(""),
+  linkedin: text("linkedin").default(""),
+  role: text("role").default("hiring_manager"), // hiring_manager | sponsor | champion | recruiter
+  notes: text("notes").default(""),
+  createdAt: text("created_at").notNull(),
+});
+
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
@@ -38,11 +71,23 @@ export const jobs = pgTable("jobs", {
   company: text("company").notNull(),
   location: text("location").notNull(),
   stage: text("stage").notNull(), // intake, sourcing, screening, interview, offer, placed
-  candidateCount: integer("candidate_count").notNull(),
-  daysOpen: integer("days_open").notNull(),
-  feePotential: text("fee_potential").notNull(),
-  description: text("description").notNull(),
-  requirements: text("requirements").notNull(), // JSON array
+  candidateCount: integer("candidate_count").notNull().default(0),
+  daysOpen: integer("days_open").notNull().default(0),
+  feePotential: text("fee_potential").notNull().default(""),
+  description: text("description").notNull().default(""),
+  requirements: text("requirements").notNull().default("[]"), // JSON array
+  // Company & contact linkage
+  companyId: integer("company_id"),           // FK → companies.id
+  hiringManagerId: integer("hiring_manager_id"), // FK → contacts.id
+  // Engagement details
+  salary: text("salary").default(""),          // salary range e.g. "$300K-$400K"
+  feePercent: doublePrecision("fee_percent").default(0), // % fee agreed
+  priority: text("priority").default("medium"),  // high | medium | low
+  jobType: text("job_type").default(""),        // full-time | contract | interim
+  openDate: text("open_date").default(""),      // when search kicked off
+  targetCloseDate: text("target_close_date").default(""),
+  notes: text("notes").default(""),
+  createdAt: text("created_at").default(""),
 });
 
 export const opportunities = pgTable("opportunities", {
@@ -184,6 +229,8 @@ export const settings = pgTable("settings", {
 });
 
 // Insert schemas
+export const insertCompanySchema = createInsertSchema(companies).omit({ id: true });
+export const insertContactSchema = createInsertSchema(contacts).omit({ id: true });
 export const insertUserSchema = createInsertSchema(users).pick({ username: true, password: true });
 export const insertCandidateSchema = createInsertSchema(candidates).omit({ id: true });
 export const insertJobSchema = createInsertSchema(jobs).omit({ id: true });
@@ -196,6 +243,10 @@ export const insertCommissionSplitSchema = createInsertSchema(commissionSplits).
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true });
 
 // Types
+export type Company = typeof companies.$inferSelect;
+export type InsertCompany = z.infer<typeof insertCompanySchema>;
+export type Contact = typeof contacts.$inferSelect;
+export type InsertContact = z.infer<typeof insertContactSchema>;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type Candidate = typeof candidates.$inferSelect;
