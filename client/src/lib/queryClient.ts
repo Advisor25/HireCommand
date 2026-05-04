@@ -45,9 +45,9 @@ export const queryClient = new QueryClient({
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
-      refetchOnWindowFocus: false,
-      staleTime: Infinity,
-      retry: false,
+      refetchOnWindowFocus: true,
+      staleTime: 1000 * 60 * 2, // 2 minutes — data refreshes after Loxo sync
+      retry: 1,
     },
     mutations: {
       retry: false,
