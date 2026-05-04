@@ -1,0 +1,300 @@
+import { pgTable, text, integer, real, serial, doublePrecision } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+// ─── Companies ────────────────────────────────────────────────────────────────
+export const companies = pgTable("companies", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  website: text("website").default(""),
+  industry: text("industry").default(""),
+  size: text("size").default(""),           // e.g. "50-250 employees"
+  type: text("type").default(""),           // PE-backed, Public, Private, Non-profit
+  peFirm: text("pe_firm").default(""),      // PE sponsor if applicable
+  hqLocation: text("hq_location").default(""),
+  description: text("description").default(""),
+  notes: text("notes").default(""),
+  linkedinUrl: text("linkedin_url").default(""),
+  createdAt: text("created_at").notNull(),
+});
+
+// ─── Contacts (hiring managers, sponsors, etc.) ───────────────────────────────
+export const contacts = pgTable("contacts", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),         // FK → companies.id (optional)
+  companyName: text("company_name").default(""), // denormalised for quick display
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  title: text("title").default(""),
+  email: text("email").default(""),
+  phone: text("phone").default(""),
+  mobile: text("mobile").default(""),
+  linkedin: text("linkedin").default(""),
+  role: text("role").default("hiring_manager"), // hiring_manager | sponsor | champion | recruiter
+  notes: text("notes").default(""),
+  createdAt: text("created_at").notNull(),
+});
+
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  password: text("password").notNull(),
+});
+
+export const candidates = pgTable("candidates", {
+  id: serial("id").primaryKey(),
+  loxoId: integer("loxo_id").unique(), // Loxo person ID for sync dedup
+  name: text("name").notNull(),
+  title: text("title").notNull(),
+  company: text("company").notNull(),
+  location: text("location").notNull(),
+  email: text("email").notNull(),
+  phone: text("phone").notNull(),
+  linkedin: text("linkedin").notNull(),
+  matchScore: integer("match_score").notNull(),
+  status: text("status").notNull(), // sourced, contacted, screening, interview, offer, placed
+  lastContact: text("last_contact").notNull(),
+  tags: text("tags").notNull(), // JSON array
+  notes: text("notes").notNull(),
+  timeline: text("timeline").notNull(), // JSON array of events
+  // LinkedIn profile sync
+  linkedinSyncedAt: text("linkedin_synced_at"),    // ISO timestamp of last successful sync
+  linkedinSnapshot: text("linkedin_snapshot"),     // JSON: last known profile data for diff
+  linkedinChanges: text("linkedin_changes"),       // JSON array of detected change objects
+  linkedinSyncError: text("linkedin_sync_error"),  // last error message if sync failed
+});
+
+export const jobs = pgTable("jobs", {
+  id: serial("id").primaryKey(),
+  loxoId: integer("loxo_id").unique(), // Loxo job ID for sync dedup
+  title: text("title").notNull(),
+  company: text("company").notNull(),
+  location: text("location").notNull(),
+  stage: text("stage").notNull(), // intake, sourcing, screening, interview, offer, placed
+  candidateCount: integer("candidate_count").notNull().default(0),
+  daysOpen: integer("days_open").notNull().default(0),
+  feePotential: text("fee_potential").notNull().default(""),
+  description: text("description").notNull().default(""),
+  requirements: text("requirements").notNull().default("[]"), // JSON array
+  // Company & contact linkage
+  companyId: integer("company_id"),           // FK → companies.id
+  hiringManagerId: integer("hiring_manager_id"), // FK → contacts.id
+  // Engagement details
+  salary: text("salary").default(""),          // salary range e.g. "$300K-$400K"
+  feePercent: doublePrecision("fee_percent").default(0), // % fee agreed
+  priority: text("priority").default("medium"),  // high | medium | low
+  jobType: text("job_type").default(""),        // full-time | contract | interim
+  openDate: text("open_date").default(""),      // when search kicked off
+  targetCloseDate: text("target_close_date").default(""),
+  notes: text("notes").default(""),
+  createdAt: text("created_at").default(""),
+});
+
+export const opportunities = pgTable("opportunities", {
+  id: serial("id").primaryKey(),
+  company: text("company").notNull(),
+  contactPerson: text("contact_person").notNull(),
+  estimatedFee: text("estimated_fee").notNull(),
+  stage: text("stage").notNull(), // lead, qualified, proposal, negotiation, won, lost
+  aiScore: text("ai_score").notNull(), // hot, warm, cold
+  lastActivity: text("last_activity").notNull(),
+  notes: text("notes").notNull(),
+  winProbability: integer("win_probability").notNull(),
+});
+
+export const campaigns = pgTable("campaigns", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  channel: text("channel").notNull(), // email, sms, linkedin, phone
+  status: text("status").notNull(), // active, paused, completed
+  sentCount: integer("sent_count").notNull(),
+  openRate: doublePrecision("open_rate").notNull(),
+  replyRate: doublePrecision("reply_rate").notNull(),
+  steps: text("steps").notNull(), // JSON array of sequence steps
+});
+
+export const activities = pgTable("activities", {
+  id: serial("id").primaryKey(),
+  type: text("type").notNull(), // email, call, interview, note, placement
+  description: text("description").notNull(),
+  timestamp: text("timestamp").notNull(),
+  relatedName: text("related_name").notNull(),
+});
+
+// Interview Intelligence table
+export const interviews = pgTable("interviews", {
+  id: serial("id").primaryKey(),
+  candidateId: integer("candidate_id").notNull(),
+  candidateName: text("candidate_name").notNull(),
+  candidateTitle: text("candidate_title").notNull(),
+  jobTitle: text("job_title").notNull(),
+  jobCompany: text("job_company").notNull(),
+  interviewType: text("interview_type").notNull(), // phone_screen, first_round, technical, final, pe_partner
+  interviewDate: text("interview_date").notNull(),
+  interviewer: text("interviewer").notNull(),
+  duration: integer("duration").notNull(), // minutes
+  overallRating: integer("overall_rating").notNull(), // 1-5
+  notes: text("notes").notNull(),
+  strengths: text("strengths").notNull(), // JSON array
+  concerns: text("concerns").notNull(), // JSON array
+  salaryDiscussed: text("salary_discussed"), // nullable — captured salary mention
+  nextSteps: text("next_steps").notNull(),
+  recommendation: text("recommendation").notNull(), // advance, hold, pass
+});
+
+// Placements — source of truth for completed deals and revenue
+export const placements = pgTable("placements", {
+  id: serial("id").primaryKey(),
+  // Search / job info
+  jobTitle: text("job_title").notNull(),
+  company: text("company").notNull(),
+  clientName: text("client_name").notNull(), // PE firm or direct client
+  // Candidate info
+  candidateName: text("candidate_name").notNull(),
+  candidateId: integer("candidate_id"), // optional FK to candidates table
+  // Financial
+  salary: doublePrecision("salary").notNull(),          // annual base salary placed at
+  feePercent: doublePrecision("fee_percent").notNull(), // e.g. 25.0 = 25%
+  feeAmount: doublePrecision("fee_amount").notNull(),   // computed: salary * feePercent / 100
+  invoiceStatus: text("invoice_status").notNull().default("pending"), // pending, invoiced, partial, paid
+  invoiceDate: text("invoice_date"),         // when invoice was sent
+  paidDate: text("paid_date"),               // when cash received
+  paidAmount: doublePrecision("paid_amount").default(0), // actual cash received
+  // Placement details
+  placedDate: text("placed_date").notNull(), // offer accepted date
+  startDate: text("start_date"),             // candidate start date
+  guaranteeDays: integer("guarantee_days").default(90), // replacement guarantee period
+  notes: text("notes").default(""),
+  // Ownership
+  leadRecruiter: text("lead_recruiter").notNull(), // Andrew | Ryan | Aileen
+});
+
+// Commission splits — one or more rows per placement
+export const commissionSplits = pgTable("commission_splits", {
+  id: serial("id").primaryKey(),
+  placementId: integer("placement_id").notNull(), // FK → placements.id
+  employee: text("employee").notNull(),           // Andrew | Ryan | Aileen
+  splitPercent: doublePrecision("split_percent").notNull(),  // % of total fee this person gets
+  commissionRate: doublePrecision("commission_rate").notNull(), // their personal comm rate
+  commissionAmount: doublePrecision("commission_amount").notNull(), // computed amount
+});
+
+// Invoices — standalone billing records (may link to a placement)
+export const invoices = pgTable("invoices", {
+  id: serial("id").primaryKey(),
+  // Invoice identity
+  invoiceNumber: text("invoice_number").notNull(),
+  status: text("status").notNull().default("draft"), // draft | sent | viewed | partial | paid | void
+  // Client / candidate
+  clientName: text("client_name").notNull(),
+  clientEmail: text("client_email").default(""),
+  clientAddress: text("client_address").default(""),
+  candidateName: text("candidate_name").default(""),
+  jobTitle: text("job_title").default(""),
+  // Financial
+  salary: doublePrecision("salary").default(0),
+  feePercent: doublePrecision("fee_percent").default(0),
+  subtotal: doublePrecision("subtotal").notNull(),
+  taxPercent: doublePrecision("tax_percent").default(0),
+  taxAmount: doublePrecision("tax_amount").default(0),
+  total: doublePrecision("total").notNull(),
+  amountPaid: doublePrecision("amount_paid").default(0),
+  amountDue: doublePrecision("amount_due").notNull(),
+  // Line items stored as JSON array
+  lineItems: text("line_items").notNull().default("[]"),
+  // Dates
+  issueDate: text("issue_date").notNull(),
+  dueDate: text("due_date").notNull(),
+  paidDate: text("paid_date"),
+  // Notes
+  notes: text("notes").default(""),
+  terms: text("terms").default("Net 30"),
+  // QuickBooks sync
+  qbInvoiceId: text("qb_invoice_id"),
+  qbCustomerId: text("qb_customer_id"),
+  qbSyncToken: text("qb_sync_token"),
+  qbSyncedAt: text("qb_synced_at"),
+  qbPaymentId: text("qb_payment_id"),
+  // Link to placement (optional)
+  placementId: integer("placement_id"),
+  // Meta
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+// Settings (key-value store for integration credentials & sync state)
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
+// Insert schemas
+export const insertCompanySchema = createInsertSchema(companies).omit({ id: true });
+export const insertContactSchema = createInsertSchema(contacts).omit({ id: true });
+export const insertUserSchema = createInsertSchema(users).pick({ username: true, password: true });
+export const insertCandidateSchema = createInsertSchema(candidates).omit({ id: true });
+export const insertJobSchema = createInsertSchema(jobs).omit({ id: true });
+export const insertOpportunitySchema = createInsertSchema(opportunities).omit({ id: true });
+export const insertCampaignSchema = createInsertSchema(campaigns).omit({ id: true });
+export const insertActivitySchema = createInsertSchema(activities).omit({ id: true });
+export const insertInterviewSchema = createInsertSchema(interviews).omit({ id: true });
+export const insertPlacementSchema = createInsertSchema(placements).omit({ id: true });
+export const insertCommissionSplitSchema = createInsertSchema(commissionSplits).omit({ id: true });
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true });
+
+// Types
+export type Company = typeof companies.$inferSelect;
+export type InsertCompany = z.infer<typeof insertCompanySchema>;
+export type Contact = typeof contacts.$inferSelect;
+export type InsertContact = z.infer<typeof insertContactSchema>;
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;
+export type Candidate = typeof candidates.$inferSelect;
+export type InsertCandidate = z.infer<typeof insertCandidateSchema>;
+export type Job = typeof jobs.$inferSelect;
+export type InsertJob = z.infer<typeof insertJobSchema>;
+export type Opportunity = typeof opportunities.$inferSelect;
+export type InsertOpportunity = z.infer<typeof insertOpportunitySchema>;
+export type Campaign = typeof campaigns.$inferSelect;
+export type InsertCampaign = z.infer<typeof insertCampaignSchema>;
+export type Activity = typeof activities.$inferSelect;
+export type InsertActivity = z.infer<typeof insertActivitySchema>;
+export type Interview = typeof interviews.$inferSelect;
+export type InsertInterview = z.infer<typeof insertInterviewSchema>;
+export type Placement = typeof placements.$inferSelect;
+export type InsertPlacement = z.infer<typeof insertPlacementSchema>;
+export type CommissionSplit = typeof commissionSplits.$inferSelect;
+export type InsertCommissionSplit = z.infer<typeof insertCommissionSplitSchema>;
+export type Invoice = typeof invoices.$inferSelect;
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+
+// ─── Email Journal ────────────────────────────────────────────────────────────
+
+export const emailJournal = pgTable("email_journal", {
+  id:            serial("id").primaryKey(),
+  gmailId:       text("gmail_id").notNull().unique(),   // Gmail message ID (dedup key)
+  threadId:      text("thread_id").notNull(),            // Gmail thread ID
+  userId:        integer("user_id").notNull(),            // Which recruiter's Gmail
+  subject:       text("subject").default(""),
+  fromName:      text("from_name").default(""),
+  fromEmail:     text("from_email").notNull(),
+  toEmails:      text("to_emails").default("[]"),        // JSON array
+  ccEmails:      text("cc_emails").default("[]"),        // JSON array
+  bodyText:      text("body_text").default(""),
+  bodyHtml:      text("body_html").default(""),
+  snippet:       text("snippet").default(""),
+  sentAt:        text("sent_at").notNull(),
+  labelIds:      text("label_ids").default("[]"),        // JSON array e.g. ["SENT","INBOX"]
+  // Matching
+  candidateId:   integer("candidate_id"),                // FK → candidates.id (nullable)
+  candidateName: text("candidate_name"),
+  contactId:     integer("contact_id"),                  // FK → contacts.id (nullable)
+  contactName:   text("contact_name"),
+  matched:       text("matched").default("false"),       // "true" | "false"
+  createdAt:     text("created_at").default(""),
+});
+
+export const insertEmailJournalSchema = createInsertSchema(emailJournal).omit({ id: true });
+export type EmailJournal = typeof emailJournal.$inferSelect;
+export type InsertEmailJournal = z.infer<typeof insertEmailJournalSchema>;
+
