@@ -23,6 +23,7 @@ if (!process.env.DATABASE_URL) {
 
 const client = postgres(process.env.DATABASE_URL || "postgresql://localhost/hirecommand", {
   max: 10,
+  ssl: 'require',
   connect_timeout: 15,
   idle_timeout: 30,
   onnotice: () => {}, // suppress notices
