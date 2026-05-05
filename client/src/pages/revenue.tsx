@@ -100,17 +100,42 @@ const fmtDate = (d: string | null) => {
 const TEAM = ["Andrew", "Ryan", "Aileen"] as const;
 type TeamMember = (typeof TEAM)[number];
 
-const DEFAULT_COMM_RATES: Record<TeamMember, number> = {
+const FACTORY_COMM_RATES: Record<TeamMember, number> = {
   Andrew: 40,
   Ryan: 35,
   Aileen: 25,
 };
 
-const COMM_GOALS: Record<TeamMember, number> = {
+const FACTORY_SPLIT_PCTS: Record<TeamMember, number> = {
+  Andrew: 33.33,
+  Ryan: 33.33,
+  Aileen: 33.34,
+};
+
+const FACTORY_GOALS: Record<TeamMember, number> = {
   Andrew: 200000,
   Ryan: 150000,
   Aileen: 100000,
 };
+
+// Load from localStorage so settings persist across sessions
+function loadCommSettings() {
+  try {
+    const saved = localStorage.getItem("hc_comm_settings");
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return {
+    rates: { ...FACTORY_COMM_RATES },
+    splits: { ...FACTORY_SPLIT_PCTS },
+    goals: { ...FACTORY_GOALS },
+  };
+}
+
+function saveCommSettings(settings: { rates: Record<string, number>; splits: Record<string, number>; goals: Record<string, number> }) {
+  try { localStorage.setItem("hc_comm_settings", JSON.stringify(settings)); } catch {}
+}
+
+const COMM_GOALS: Record<TeamMember, number> = FACTORY_GOALS;
 
 const AVATAR_COLORS: Record<TeamMember, string> = {
   Andrew: "bg-blue-600",
@@ -183,12 +208,15 @@ const DEFAULT_FORM: PlacementForm = {
   notes: "",
 };
 
-const DEFAULT_SPLITS: SplitRow[] = TEAM.map((emp) => ({
-  employee: emp,
-  included: true,
-  splitPercent: parseFloat((100 / TEAM.length).toFixed(2)),
-  commissionRate: DEFAULT_COMM_RATES[emp],
-}));
+const DEFAULT_SPLITS: SplitRow[] = TEAM.map((emp) => {
+  const settings = loadCommSettings();
+  return {
+    employee: emp,
+    included: true,
+    splitPercent: settings.splits[emp] ?? FACTORY_SPLIT_PCTS[emp],
+    commissionRate: settings.rates[emp] ?? FACTORY_COMM_RATES[emp],
+  };
+});
 
 function LogPlacementModal({
   open,
@@ -901,6 +929,122 @@ function buildCSVRows(placements: Placement[], employee?: string): string[][] {
 
 // ──────────────── Commissions Tab ────────────────
 
+// ──────────────── Commission Settings Panel ────────────────
+
+function CommissionSettings() {
+  const { toast } = useToast();
+  const [settings, setSettings] = useState(() => loadCommSettings());
+  const [dirty, setDirty] = useState(false);
+
+  const update = (section: "rates" | "splits" | "goals", emp: string, val: number) => {
+    setSettings((prev: any) => ({ ...prev, [section]: { ...prev[section], [emp]: val } }));
+    setDirty(true);
+  };
+
+  const save = () => {
+    saveCommSettings(settings);
+    setDirty(false);
+    toast({ title: "Commission settings saved", description: "New rates apply to all future placements." });
+  };
+
+  const reset = () => {
+    const def = { rates: { ...FACTORY_COMM_RATES }, splits: { ...FACTORY_SPLIT_PCTS }, goals: { ...FACTORY_GOALS } };
+    setSettings(def);
+    saveCommSettings(def);
+    setDirty(false);
+    toast({ title: "Reset to defaults" });
+  };
+
+  const splitTotal = TEAM.reduce((s, e) => s + (settings.splits[e] ?? 0), 0);
+  const splitOk = Math.abs(splitTotal - 100) < 0.1;
+
+  return (
+    <div className="rounded-xl border bg-card p-5 space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-sm">Commission Settings</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">Default rates and splits applied when logging a new placement</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={reset} className="text-xs h-7">Reset Defaults</Button>
+          <Button size="sm" onClick={save} disabled={!dirty} className="text-xs h-7">
+            {dirty ? "Save Changes" : "Saved"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left pb-2 text-xs font-medium text-muted-foreground">Employee</th>
+              <th className="text-left pb-2 text-xs font-medium text-muted-foreground">Commission Rate %<br/><span className="font-normal text-xs text-muted-foreground/70">% of their fee share they earn</span></th>
+              <th className="text-left pb-2 text-xs font-medium text-muted-foreground">Default Split %<br/><span className="font-normal text-xs text-muted-foreground/70">% of placement fee allocated</span></th>
+              <th className="text-left pb-2 text-xs font-medium text-muted-foreground">Annual Goal $</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {TEAM.map((emp) => (
+              <tr key={emp}>
+                <td className="py-3 pr-4">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white ${AVATAR_COLORS[emp]}`}>
+                      {emp[0]}
+                    </div>
+                    <span className="font-medium">{emp}</span>
+                  </div>
+                </td>
+                <td className="py-3 pr-4">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number" min={0} max={100} step={0.5}
+                      value={settings.rates[emp] ?? FACTORY_COMM_RATES[emp]}
+                      onChange={e => update("rates", emp, parseFloat(e.target.value) || 0)}
+                      className="w-20 border rounded px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <span className="text-muted-foreground text-xs">%</span>
+                  </div>
+                </td>
+                <td className="py-3 pr-4">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number" min={0} max={100} step={0.01}
+                      value={settings.splits[emp] ?? FACTORY_SPLIT_PCTS[emp]}
+                      onChange={e => update("splits", emp, parseFloat(e.target.value) || 0)}
+                      className={`w-20 border rounded px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 ${splitOk ? "focus:ring-primary" : "border-red-400 focus:ring-red-400"}`}
+                    />
+                    <span className="text-muted-foreground text-xs">%</span>
+                  </div>
+                </td>
+                <td className="py-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-muted-foreground text-xs">$</span>
+                    <input
+                      type="number" min={0} step={1000}
+                      value={settings.goals[emp] ?? FACTORY_GOALS[emp]}
+                      onChange={e => update("goals", emp, parseFloat(e.target.value) || 0)}
+                      className="w-28 border rounded px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t">
+              <td colSpan={2} className="pt-2 text-xs text-muted-foreground">Split total must equal 100%</td>
+              <td className={`pt-2 text-xs font-semibold ${splitOk ? "text-green-600" : "text-red-500"}`}>
+                {splitTotal.toFixed(2)}% {splitOk ? "✓" : "⚠ must = 100%"}
+              </td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function CommissionsTab({ placements }: { placements: Placement[] }) {
   const { toast } = useToast();
   const [empTab, setEmpTab] = useState<string>("all");
@@ -1218,7 +1362,10 @@ export default function RevenuePage() {
               Loading commissions…
             </div>
           ) : (
-            <CommissionsTab placements={placements} />
+            <div className="space-y-4">
+              <CommissionSettings />
+              <CommissionsTab placements={placements} />
+            </div>
           )}
         </TabsContent>
       </Tabs>
