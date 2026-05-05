@@ -341,7 +341,11 @@ export function registerLinkedInSyncRoutes(app: Express) {
         },
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error("[LinkedIn Sync] Status check failed:", err.message);
+      res.json({ lastSync: null, nextSync: null, summary: null,
+        stats: { totalCandidates: 0, withLinkedIn: 0, neverSynced: 0,
+                 recentChanges: 0, hasProxyCurl: !!process.env.PROXYCURL_API_KEY },
+        dbError: true });
     }
   });
 
@@ -355,7 +359,11 @@ export function registerLinkedInSyncRoutes(app: Express) {
         console.error("[LinkedIn Sync] Error during manual sync:", err);
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error("[LinkedIn Sync] Status check failed:", err.message);
+      res.json({ lastSync: null, nextSync: null, summary: null,
+        stats: { totalCandidates: 0, withLinkedIn: 0, neverSynced: 0,
+                 recentChanges: 0, hasProxyCurl: !!process.env.PROXYCURL_API_KEY },
+        dbError: true });
     }
   });
 
@@ -369,7 +377,11 @@ export function registerLinkedInSyncRoutes(app: Express) {
       const updated = await storage.getCandidate(id);
       res.json({ result, candidate: updated });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error("[LinkedIn Sync] Status check failed:", err.message);
+      res.json({ lastSync: null, nextSync: null, summary: null,
+        stats: { totalCandidates: 0, withLinkedIn: 0, neverSynced: 0,
+                 recentChanges: 0, hasProxyCurl: !!process.env.PROXYCURL_API_KEY },
+        dbError: true });
     }
   });
 
@@ -394,7 +406,11 @@ export function registerLinkedInSyncRoutes(app: Express) {
         }));
       res.json(withChanges);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error("[LinkedIn Sync] Status check failed:", err.message);
+      res.json({ lastSync: null, nextSync: null, summary: null,
+        stats: { totalCandidates: 0, withLinkedIn: 0, neverSynced: 0,
+                 recentChanges: 0, hasProxyCurl: !!process.env.PROXYCURL_API_KEY },
+        dbError: true });
     }
   });
 }
@@ -404,6 +420,7 @@ export function registerLinkedInSyncRoutes(app: Express) {
 // kick off a background sync automatically.
 
 export async function checkAndRunStartupSync() {
+  await new Promise(resolve => setTimeout(resolve, 60_000));
   try {
     const lastSync = await storage.getSetting("linkedin_last_sync");
     if (!lastSync) {
