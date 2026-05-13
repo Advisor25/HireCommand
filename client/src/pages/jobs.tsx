@@ -125,7 +125,7 @@ function JobFormDialog({ trigger, initial, existing, jobId, onDone, dialogTitle 
   initial?: Partial<JobForm>;
   existing?: Job;
   jobId?: number;
-  onDone: () => void;
+  onDone: (job?: Job) => void;
   dialogTitle: string;
 }) {
   const { toast } = useToast();
@@ -151,7 +151,7 @@ function JobFormDialog({ trigger, initial, existing, jobId, onDone, dialogTitle 
         description: !jobId ? `AI sourced ${matchCount} matching candidate${matchCount === 1 ? "" : "s"} from the database.` : undefined,
       });
       setOpen(false);
-      onDone();
+      onDone(data);
     },
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -838,15 +838,28 @@ export default function Jobs() {
             return (
               <div className="space-y-6">
                 <SheetHeader>
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                      <Briefcase size={18} className="text-primary" />
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <Briefcase size={18} className="text-primary" />
+                      </div>
+                      <div className="min-w-0">
+                        <SheetTitle className="text-lg font-display truncate">{selectedJob.title}</SheetTitle>
+                        <p className="text-sm text-muted-foreground truncate">{selectedJob.company}</p>
+                        {selectedJob.location && <p className="text-xs text-muted-foreground truncate">{selectedJob.location}</p>}
+                      </div>
                     </div>
-                    <div>
-                      <SheetTitle className="text-lg font-display">{selectedJob.title}</SheetTitle>
-                      <p className="text-sm text-muted-foreground">{selectedJob.company}</p>
-                      {selectedJob.location && <p className="text-xs text-muted-foreground">{selectedJob.location}</p>}
-                    </div>
+                    <JobFormDialog
+                      dialogTitle="Edit Job"
+                      initial={jobToForm(selectedJob)}
+                      existing={selectedJob}
+                      jobId={selectedJob.id}
+                      trigger={<Button size="sm" variant="outline" className="gap-1.5 flex-shrink-0"><Pencil size={13} /> Edit Job</Button>}
+                      onDone={(updated) => {
+                        if (updated) setSelectedJob(updated);
+                        queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+                      }}
+                    />
                   </div>
                 </SheetHeader>
 
@@ -1043,7 +1056,10 @@ export default function Jobs() {
                     existing={selectedJob}
                     jobId={selectedJob.id}
                     trigger={<Button size="sm" variant="outline" className="gap-1.5 flex-1"><Pencil size={13} /> Edit</Button>}
-                    onDone={() => queryClient.invalidateQueries({ queryKey: ["/api/jobs"] })}
+                    onDone={(updated) => {
+                      if (updated) setSelectedJob(updated);
+                      queryClient.invalidateQueries({ queryKey: ["/api/jobs"] });
+                    }}
                   />
                   {selectedJob.stage === "closed" ? (
                     <Button size="sm" variant="outline" className="gap-1.5"
