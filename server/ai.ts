@@ -21,7 +21,7 @@ export async function callClaude(
   system = "You are an expert executive recruiting assistant for The Hiring Advisors.",
   maxTokens = 1500,
 ): Promise<string> {
-  const key = await getAnthropicApiKey();
+  const key = (await getAnthropicApiKey()).trim();
   if (!key) throw new Error("Anthropic API key not configured — set ANTHROPIC_API_KEY, ANTHROPIC_KEY, or CLAUDE_API_KEY in Render environment variables");
 
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
@@ -32,7 +32,7 @@ export async function callClaude(
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5",
+      model: process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-6",
       max_tokens: maxTokens,
       system,
       messages: [{ role: "user", content: prompt }],

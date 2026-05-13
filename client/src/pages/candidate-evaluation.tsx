@@ -265,7 +265,6 @@ export default function CandidateEvaluation() {
   const evaluation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/evaluate", {
-        model: "claude-sonnet-4-20250514",
         max_tokens: 1500,
         temperature: 0.2,
         system: SYSTEM_PROMPT,

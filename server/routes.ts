@@ -254,9 +254,10 @@ export async function registerRoutes(
 
   // ======================== AI CANDIDATE EVALUATION ========================
   // Browser-safe Anthropic proxy. Keep ANTHROPIC_API_KEY server-side; never ship it to the client.
+  const ANTHROPIC_DEFAULT_MODEL = process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-6";
   app.post("/api/evaluate", async (req, res) => {
     try {
-      const apiKey = process.env.ANTHROPIC_API_KEY;
+      const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
       if (!apiKey) {
         return res.status(500).json({ error: "ANTHROPIC_API_KEY is not configured on the server" });
       }
@@ -268,7 +269,7 @@ export async function registerRoutes(
           "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
         },
-        body: JSON.stringify(req.body),
+        body: JSON.stringify({ ...req.body, model: ANTHROPIC_DEFAULT_MODEL }),
       });
 
       const data = await response.json();
@@ -682,7 +683,7 @@ export async function registerRoutes(
 
   app.post("/api/jobs/:jobId/candidates/:candidateId/evaluate", async (req, res) => {
     try {
-      const apiKey = process.env.ANTHROPIC_API_KEY;
+      const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
       if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY is not configured on the server" });
 
       const jobId = Number(req.params.jobId);
@@ -725,7 +726,7 @@ Respond ONLY with valid JSON. No markdown fences, no preamble. Exact schema:
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: req.body?.model || "claude-sonnet-4-20250514",
+          model: ANTHROPIC_DEFAULT_MODEL,
           max_tokens: req.body?.max_tokens || 1500,
           temperature: req.body?.temperature ?? 0.2,
           system,
@@ -1376,6 +1377,13 @@ Respond ONLY with valid JSON. No markdown fences, no preamble. Exact schema:
           requirements: JSON.stringify([j.requirements, j.skills, j.specialties].filter(Boolean)),
         });
         await syncCompanyFromLoxo(j.company || j.company_name || j.client_company || j.client_company_name || companyName, companyName);
+        await syncEmbeddedCompanyContacts({ ...(typeof j.company === "object" ? j.company : { name: companyName }), contacts: j.contacts || [] }, companyName);
+        for (const owner of Array.isArray(j.owners) ? j.owners : []) {
+          await syncClientContactFromLoxo(
+            { ...owner, company: owner.company || owner.company_name || j.company || companyName },
+            companyName,
+          );
+        }
         return job;
       };
 
@@ -1503,7 +1511,39 @@ Respond ONLY with valid JSON. No markdown fences, no preamble. Exact schema:
 
       // --- Sync Companies ---
       send({ phase: "companies", message: "Fetching companies from Loxo...", progress: 35 });
-      for (const endpoint of ["companies", "client_companies", "company", "client-companies"]) {
+      const syncCompanyRecords = async (records: any[], endpoint = "companies") => {
+        for (const c of records) {
+          if (!c.id || !companyNameFrom(c)) continue;
+          await syncCompanyFromLoxo(c);
+          await syncCompanyContactsFromLoxo(c, endpoint);
+        }
+      };
+
+      // Loxo company search is scroll-based and rejects per_page/page params with 422.
+      let companyScrollId: string | null = null;
+      let companyScrollPage = 0;
+      while (companyScrollPage < 1000) {
+        const path = companyScrollId
+          ? `companies?scroll_id=${encodeURIComponent(companyScrollId)}`
+          : "companies";
+        const r = await fetch(`${LOXO_BASE}/${slug}/${path}`, {
+          headers: { Authorization: `Token ${apiKey}` },
+        });
+        if (r.status === 404) break;
+        if (!r.ok) { send({ phase: "companies", message: `Skipping companies: Loxo returned ${r.status}` }); break; }
+        const data: any = await r.json();
+        const records = loxoList(data, ["companies"]);
+        if (records.length === 0) break;
+
+        await syncCompanyRecords(records, "companies");
+        companyScrollId = data.scroll_id || data.next_scroll_id || null;
+        companyScrollPage++;
+        send({ phase: "companies", message: `Synced ${totalCompanies} companies...`, progress: 35 + Math.min(15, companyScrollPage), count: totalCompanies });
+        if (!companyScrollId) break;
+      }
+
+      // Keep harmless fallback probes for accounts that expose alternate company endpoints.
+      for (const endpoint of ["client_companies", "company", "client-companies"]) {
         let page = 1;
         let hasMore = true;
         while (hasMore && page <= 500) {
@@ -1516,12 +1556,7 @@ Respond ONLY with valid JSON. No markdown fences, no preamble. Exact schema:
           const records = loxoList(data, ["companies", "client_companies"]);
           if (records.length === 0) break;
 
-          for (const c of records) {
-            if (!c.id || !companyNameFrom(c)) continue;
-            await syncCompanyFromLoxo(c);
-            await syncCompanyContactsFromLoxo(c, endpoint);
-          }
-
+          await syncCompanyRecords(records, endpoint);
           send({ phase: "companies", message: `Synced ${totalCompanies} companies...`, progress: 35 + Math.min(15, page), count: totalCompanies });
           hasMore = records.length >= 100;
           page++;
