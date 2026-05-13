@@ -1121,8 +1121,9 @@ Respond ONLY with valid JSON. No markdown fences, no preamble. Exact schema:
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
-    if (!raw) return true;
-    return !/(closed|inactive|archived|cancelled|canceled|filled|placed|lost|on hold|hold)/.test(raw);
+    if (!raw) return false;
+    if (/(closed|inactive|archived|cancelled|canceled|filled|placed|lost|on hold|hold)/.test(raw)) return false;
+    return /active|open/.test(raw);
   };
 
   // Save credentials
@@ -1190,6 +1191,7 @@ Respond ONLY with valid JSON. No markdown fences, no preamble. Exact schema:
     let totalJobs = 0;
     let totalActiveJobs = 0;
     const activeJobLoxoIds: number[] = [];
+    const pendingCandidateJobLinks: Array<{ candidateId: number; loxoJobId: number; pipelineRecord: any }> = [];
 
     try {
       const seenCompanyKeys = new Set<string>();
@@ -1441,11 +1443,14 @@ Respond ONLY with valid JSON. No markdown fences, no preamble. Exact schema:
           await syncCompanyFromLoxo(p.company || p.current_company || p.current_company_name || p.client_company || p.client_company_name, candidate.company);
 
           for (const pipelineRecord of candidateJobs) {
-            const job = await upsertActiveJobFromLoxo(pipelineRecord);
-            if (job?.id) {
-              await storage.addCandidateToJob(savedCandidate.id, job.id);
-              const pipelineStatus = String(pipelineRecord.status?.name || pipelineRecord.status || pipelineRecord.stage || "").toLowerCase();
-              if (pipelineStatus) await storage.updateCandidateJobStatus(savedCandidate.id, job.id, stageFromLoxoJob(pipelineRecord));
+            const loxoPipelineJob = loxoJobFromPipelineRecord(pipelineRecord);
+            const loxoPipelineJobId = loxoJobId(loxoPipelineJob);
+            if (loxoPipelineJobId) {
+              pendingCandidateJobLinks.push({
+                candidateId: savedCandidate.id,
+                loxoJobId: loxoPipelineJobId,
+                pipelineRecord,
+              });
             }
           }
           totalCandidates++;
@@ -1640,10 +1645,22 @@ Respond ONLY with valid JSON. No markdown fences, no preamble. Exact schema:
       }
       }
 
+      let linkedActiveCandidateJobs = 0;
+      for (const link of pendingCandidateJobLinks) {
+        if (!activeJobLoxoIds.includes(link.loxoJobId)) continue;
+        const job = await storage.getJobByLoxoId(link.loxoJobId);
+        if (!job?.id || job.stage === "closed") continue;
+        await storage.addCandidateToJob(link.candidateId, job.id);
+        const pipelineStatus = String(link.pipelineRecord.status?.name || link.pipelineRecord.status || link.pipelineRecord.stage || "").toLowerCase();
+        if (pipelineStatus) await storage.updateCandidateJobStatus(link.candidateId, job.id, stageFromLoxoJob(link.pipelineRecord));
+        linkedActiveCandidateJobs++;
+      }
+
       const closedMissing = await storage.closeMissingLoxoJobs(activeJobLoxoIds);
       await storage.setSetting("loxo_jobs_synced", String(totalJobs));
       await storage.setSetting("loxo_active_jobs_synced", String(totalActiveJobs));
       await storage.setSetting("loxo_jobs_closed_missing", String(closedMissing));
+      await storage.setSetting("loxo_active_candidate_job_links", String(linkedActiveCandidateJobs));
       await storage.setSetting("loxo_last_sync", new Date().toISOString());
       await storage.setSetting("loxo_sync_running", "false");
 
@@ -1657,6 +1674,7 @@ Respond ONLY with valid JSON. No markdown fences, no preamble. Exact schema:
         jobsSynced: totalJobs,
         activeJobsSynced: totalActiveJobs,
         closedMissingJobs: closedMissing,
+        linkedActiveCandidateJobs,
       });
       res.end();
     } catch (e: any) {
