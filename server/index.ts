@@ -112,16 +112,20 @@ app.use((req, res, next) => {
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    if (res.headersSent) return next(err);
 
     console.error("Internal Server Error:", err);
 
-    if (res.headersSent) {
-      return next(err);
-    }
+    // Never expose upstream auth errors (e.g. Supabase 401/403) as HTTP 401/403
+    // — those are DB connectivity issues, not client auth failures.
+    // Always return 500 for server-side errors so clients don't get confused.
+    const upstreamStatus = err.status || err.statusCode;
+    const isSafeToForward = upstreamStatus && upstreamStatus >= 400 && upstreamStatus < 500
+      && upstreamStatus !== 401 && upstreamStatus !== 403;
+    const status = isSafeToForward ? upstreamStatus : 500;
+    const message = err.message || "Internal Server Error";
 
-    return res.status(status).json({ message });
+    return res.status(status).json({ error: message });
   });
 
   // importantly only setup vite in development and after

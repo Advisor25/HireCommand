@@ -345,10 +345,21 @@ export async function syncAllLinkedInProfiles(): Promise<{
 
 // ─── Express routes ───────────────────────────────────────────────────────────
 
+// Simple token for cron/internal calls — avoids any proxy-level auth
+const CRON_SECRET = process.env.CRON_SECRET || "hirecommand-cron-2026";
+
+function allowCronOrSession(req: any, res: any, next: any) {
+  // Allow if correct cron secret header present
+  const token = req.headers["x-cron-secret"] || req.query["cron_secret"];
+  if (token === CRON_SECRET) return next();
+  // Allow all other requests through (no session auth on this app)
+  return next();
+}
+
 export function registerLinkedInSyncRoutes(app: Express) {
 
   // GET /api/linkedin-sync/status — last sync timestamp + summary
-  app.get("/api/linkedin-sync/status", async (_req, res) => {
+  app.get("/api/linkedin-sync/status", allowCronOrSession, async (_req, res) => {
     try {
       const lastSync    = await storage.getSetting("linkedin_last_sync");
       const summaryRaw  = await storage.getSetting("linkedin_last_sync_summary");
@@ -385,16 +396,11 @@ export function registerLinkedInSyncRoutes(app: Express) {
 
   // POST /api/linkedin-sync/run — trigger full sync manually
   app.post("/api/linkedin-sync/run", async (_req, res) => {
-    try {
-      // Run async — respond immediately, sync happens in background
-      res.json({ message: "LinkedIn profile sync started", startedAt: new Date().toISOString() });
-      // Fire and forget — results stored in DB
-      syncAllLinkedInProfiles().catch(err => {
-        console.error("[LinkedIn Sync] Error during manual sync:", err);
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+    // Always respond 200 immediately — sync runs in background
+    res.json({ message: "LinkedIn profile sync started", startedAt: new Date().toISOString() });
+    syncAllLinkedInProfiles().catch(err => {
+      console.error("[LinkedIn Sync] Error during manual sync:", err);
+    });
   });
 
   // POST /api/linkedin-sync/candidate/:id — sync a single candidate now
