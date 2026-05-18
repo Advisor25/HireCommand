@@ -8,6 +8,8 @@ import { registerQBRoutes } from "./quickbooks";
 import { registerLinkedInSyncRoutes, checkAndRunStartupSync } from "./linkedin-sync";
 import { registerCandidateImportRoutes } from "./candidate-import";
 import { insertInvoiceSchema } from "@shared/schema";
+import passport from "passport";
+import { requireAuth, requireAdmin, hashPassword } from "./auth";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -17,6 +19,77 @@ export async function registerRoutes(
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
+
+  // ======================== AUTH ========================
+  app.post("/api/login", (req, res, next) => {
+    passport.authenticate("local", (err: any, user: any, info: any) => {
+      if (err) return next(err);
+      if (!user) return res.status(401).json({ error: info?.message || "Invalid credentials" });
+      req.logIn(user, (err2) => {
+        if (err2) return next(err2);
+        const { password: _pw, ...safe } = user;
+        res.json(safe);
+      });
+    })(req, res, next);
+  });
+
+  app.post("/api/logout", (req, res, next) => {
+    req.logout((err) => {
+      if (err) return next(err);
+      res.json({ ok: true });
+    });
+  });
+
+  app.get("/api/me", (req, res) => {
+    if (!req.isAuthenticated()) return res.status(401).json({ error: "Unauthorized" });
+    const { password: _pw, ...safe } = req.user as any;
+    res.json(safe);
+  });
+
+  app.get("/api/users", requireAdmin, async (_req, res) => {
+    const allUsers = await storage.getAllUsers();
+    res.json(allUsers.map(({ password: _pw, ...u }) => u));
+  });
+
+  app.post("/api/users", requireAdmin, async (req, res) => {
+    const { email, username, password, role, recruiterName } = req.body;
+    if (!email || !password) return res.status(400).json({ error: "email and password required" });
+    const hashed = await hashPassword(password);
+    const user = await storage.createUser({
+      email,
+      username: username || email,
+      password: hashed,
+      role: role || "user",
+      recruiterName: recruiterName || null,
+    });
+    const { password: _pw, ...safe } = user;
+    res.status(201).json(safe);
+  });
+
+  app.patch("/api/users/:id", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    const { password, ...rest } = req.body;
+    const update: Record<string, unknown> = { ...rest };
+    if (password) update.password = await hashPassword(password);
+    const user = await storage.updateUser(id, update as any);
+    if (!user) return res.status(404).json({ error: "Not found" });
+    const { password: _pw, ...safe } = user;
+    res.json(safe);
+  });
+
+  app.post("/api/me/change-password", requireAuth, async (req, res) => {
+    const me = req.user as any;
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: "Missing fields" });
+    const bcrypt = await import("bcrypt");
+    const ok = await bcrypt.compare(currentPassword, me.password);
+    if (!ok) return res.status(401).json({ error: "Current password incorrect" });
+    await storage.updateUser(me.id, { password: await hashPassword(newPassword) });
+    res.json({ ok: true });
+  });
+
+  // All API routes below this line require a valid session.
+  app.use("/api", requireAuth);
 
   // ======================== CANDIDATES ========================
   app.get("/api/candidates", async (_req, res) => {
