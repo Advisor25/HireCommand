@@ -88,6 +88,34 @@ export async function registerRoutes(
     res.json({ ok: true });
   });
 
+  // ======================== CRON / INTERNAL ROUTES (no session required) ========================
+  // These must be registered BEFORE the requireAuth wall below.
+  const CRON_SECRET = process.env.CRON_SECRET || "hirecommand-cron-2026";
+  function verifyCronSecret(req: any, res: any, next: any) {
+    const token = req.headers["x-cron-secret"] || req.query["cron_secret"];
+    if (token !== CRON_SECRET) return res.status(403).json({ error: "Forbidden" });
+    return next();
+  }
+
+  app.post("/api/linkedin-sync/run", verifyCronSecret, async (_req, res) => {
+    res.json({ message: "LinkedIn profile sync started", startedAt: new Date().toISOString() });
+    const { syncAllLinkedInProfiles } = await import("./linkedin-sync");
+    syncAllLinkedInProfiles().catch((err: any) =>
+      console.error("[LinkedIn Sync] cron error:", err.message)
+    );
+  });
+
+  app.get("/api/linkedin-sync/status", verifyCronSecret, async (_req, res) => {
+    try {
+      const lastSync   = await storage.getSetting("linkedin_last_sync");
+      const summaryRaw = await storage.getSetting("linkedin_last_sync_summary");
+      const summary    = summaryRaw ? JSON.parse(summaryRaw) : null;
+      res.json({ lastSync: lastSync || null, summary });
+    } catch (e: any) {
+      res.status(503).json({ error: "Database unavailable", detail: e.message });
+    }
+  });
+
   // All API routes below this line require a valid session.
   app.use("/api", requireAuth);
 
