@@ -21,6 +21,7 @@ import {
   CalendarDays,
   Sparkles,
   BrainCircuit,
+  BadgeDollarSign,
 } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,7 @@ const navItems = [
   { href: "/revenue", icon: DollarSign, label: "Revenue" },
   { href: "/invoices", icon: FileText, label: "Invoices" },
   { href: "/reports", icon: BarChart3, label: "Reports" },
+  { href: "/salary-benchmarks", icon: BadgeDollarSign, label: "Salary Benchmarks" },
   { href: "/intelligence", icon: Radar, label: "Intelligence Hub" },
   { href: "/settings", icon: Settings, label: "Settings" },
 ];
